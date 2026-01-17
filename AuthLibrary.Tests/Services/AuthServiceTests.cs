@@ -1,4 +1,6 @@
 using AuthLibrary.Tests.Helpers;
+using System.Security.Cryptography;
+using System.Text;
 
 using MockFactory = AuthLibrary.Tests.Helpers.MockFactory;
 
@@ -208,6 +210,449 @@ public class AuthServiceBasicTests
 
     #endregion
 
+    #region Configuration Tests
+
+    [Fact]
+    public void Constructor_WithEmptyPepper_Throws()
+    {
+        // Arrange
+        var badSecuritySettings = MockFactory.CreateOptions(new SecuritySettings { Pepper = "" });
+
+        // Act
+        var act = () => new AuthService<TestUser>(
+            _repositoryMock.Object,
+            badSecuritySettings,
+            _mailServiceMock.Object,
+            _tokenServiceMock.Object,
+            _rateLimitServiceMock.Object,
+            _templateServiceMock.Object,
+            _authSettings,
+            _mailSettings,
+            _loggerMock.Object,
+            _passwordValidatorMock.Object
+        );
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Pepper*");
+    }
+
+    #endregion
+
+    #region Register Tests
+
+    [Fact]
+    public async Task AddUser_WithValidUser_ReturnsOkAndSendsVerificationEmail()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        string passwordError = string.Empty;
+        _passwordValidatorMock.Setup(x => x.IsValid(user.Password, out passwordError))
+            .Returns(true);
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.UserExistsAsync(user.Username, user.Email))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.AddUserAsync(user))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        _repositoryMock.Verify(x => x.AddUserAsync(user), Times.Once);
+        _repositoryMock.Verify(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Exactly(2));
+        _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Once);
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(RateLimitRequestType.Register, user.Email), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddUser_WhenRateLimited_ReturnsFailure()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("bloccato");
+        _repositoryMock.Verify(x => x.AddUserAsync(It.IsAny<TestUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddUser_WhenUserExists_ReturnsFailure()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.UserExistsAsync(user.Username, user.Email))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("utente");
+        _repositoryMock.Verify(x => x.AddUserAsync(It.IsAny<TestUser>()), Times.Never);
+        _passwordValidatorMock.Verify(x => x.IsValid(It.IsAny<string>(), out It.Ref<string>.IsAny), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddUser_WithWeakPassword_ReturnsFailure()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithPassword("weak")
+            .Build();
+
+        string passwordError = "weak password";
+        _passwordValidatorMock.Setup(x => x.IsValid(user.Password, out passwordError))
+            .Returns(false);
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Register, user.Email))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.UserExistsAsync(user.Username, user.Email))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("weak");
+        _repositoryMock.Verify(x => x.AddUserAsync(It.IsAny<TestUser>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddUser_WhenEmailSendFails_RollsBackUserAndToken()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithId("user-1")
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        string passwordError = string.Empty;
+        _passwordValidatorMock.Setup(x => x.IsValid(user.Password, out passwordError))
+            .Returns(true);
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.UserExistsAsync(user.Username, user.Email))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.AddUserAsync(user))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.RemoveUserAsync(user))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.RemoveEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .ThrowsAsync(new InvalidOperationException("smtp down"));
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        _repositoryMock.Verify(x => x.RemoveUserAsync(user), Times.Once);
+        _repositoryMock.Verify(x => x.RemoveEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Exactly(3));
+    }
+
+    #endregion
+
+    #region Email Verification Tests
+
+    [Fact]
+    public async Task ResendVerificationEmail_WithUnverifiedUser_SendsEmailAndReturnsOk()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithEmailVerified(false)
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, user.Email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(user.Email))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.RemoveEmailVerifiedTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.ResendVerificationEmail(user.Email);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        _repositoryMock.Verify(x => x.RemoveEmailVerifiedTokensByUserIdAsync(user.Id), Times.Once);
+        _repositoryMock.Verify(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
+        _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task VerifyMail_WithValidToken_MarksEmailVerified()
+    {
+        // Arrange
+        var token = "verify-token";
+        var tokenHash = HashToken(token);
+
+        var user = TestDataBuilder.User()
+            .WithId("user-1")
+            .WithEmail("test@example.com")
+            .WithEmailVerified(false)
+            .Build();
+
+        var entry = new EmailVerifiedToken
+        {
+            UserId = user.Id,
+            TokenHash = tokenHash,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        _repositoryMock.Setup(x => x.GetEmailVerifiedTokenAsync(tokenHash))
+            .ReturnsAsync(entry);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(user.Id))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.UpdateUserAsync(It.IsAny<TestUser>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.RemoveEmailVerifiedTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.VerifyMail(token);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeTrue();
+        _repositoryMock.Verify(x => x.UpdateUserAsync(It.Is<TestUser>(u => u.EmailVerified)), Times.Once);
+        _repositoryMock.Verify(x => x.RemoveEmailVerifiedTokensByUserIdAsync(user.Id), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
+    }
+
+    #endregion
+
+    #region Password Recovery Tests
+
+    [Fact]
+    public async Task RecoveryPassword_WithExistingUser_SendsResetEmail()
+    {
+        // Arrange
+        var email = "test@example.com";
+        var user = TestDataBuilder.User()
+            .WithId("user-1")
+            .WithEmail(email)
+            .WithUsername("testuser")
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ResetPassword, email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(email))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.RemovePasswordResetTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddPasswordResetTokenAsync(It.IsAny<PasswordResetToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.RecoveryPassword(email);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().Contain("reset");
+        _repositoryMock.Verify(x => x.AddPasswordResetTokenAsync(It.IsAny<PasswordResetToken>()), Times.Once);
+        _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResetPasswordRedirect_WithExpiredToken_ReturnsFalseAndRemovesToken()
+    {
+        // Arrange
+        var token = "expired-token";
+        var tokenHash = HashToken(token);
+
+        var entry = new PasswordResetToken
+        {
+            UserId = "user-1",
+            TokenHash = tokenHash,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        };
+
+        _repositoryMock.Setup(x => x.GetPasswordResetTokenAsync(tokenHash))
+            .ReturnsAsync(entry);
+        _repositoryMock.Setup(x => x.RemovePasswordResetTokenAsync(entry))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.ResetPasswordRedirect(token);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeFalse();
+        _repositoryMock.Verify(x => x.RemovePasswordResetTokenAsync(entry), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WithValidToken_UpdatesPasswordAndReturnsTrue()
+    {
+        // Arrange
+        var token = "valid-token";
+        var tokenHash = HashToken(token);
+
+        var user = TestDataBuilder.User()
+            .WithId("user-1")
+            .WithPassword("old-hash")
+            .WithSalt("old-salt")
+            .Build();
+
+        var entry = new PasswordResetToken
+        {
+            UserId = user.Id,
+            TokenHash = tokenHash,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        };
+
+        var body = new ResetPasswordDto
+        {
+            Token = token,
+            Password = "NewPassword123!",
+            ConfirmPassword = "NewPassword123!"
+        };
+
+        string passwordError = string.Empty;
+        _passwordValidatorMock.Setup(x => x.IsValid(body.Password, out passwordError))
+            .Returns(true);
+
+        _repositoryMock.Setup(x => x.GetPasswordResetTokenAsync(tokenHash))
+            .ReturnsAsync(entry);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(user.Id))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.RemovePasswordResetTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        TestUser? updatedUser = null;
+        _repositoryMock.Setup(x => x.UpdateUserAsync(It.IsAny<TestUser>()))
+            .Callback<TestUser>(u => updatedUser = u)
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.ResetPassword(body);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeTrue();
+        updatedUser.Should().NotBeNull();
+        updatedUser!.Password.Should().NotBe("old-hash");
+        updatedUser.Salt.Should().NotBe("old-salt");
+        updatedUser.PasswordUpdatedAt.Should().NotBeNull();
+        _repositoryMock.Verify(x => x.RemovePasswordResetTokensByUserIdAsync(user.Id), Times.Once);
+        _repositoryMock.Verify(x => x.UpdateUserAsync(It.IsAny<TestUser>()), Times.Once);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     /// <summary>
@@ -231,6 +676,13 @@ public class AuthServiceBasicTests
         using var argon2 = new Isopoh.Cryptography.Argon2.Argon2(config);
         using var hash = argon2.Hash();
         return Convert.ToBase64String(hash.Buffer);
+    }
+
+    private static string HashToken(string token)
+    {
+        var bytes = Encoding.UTF8.GetBytes(token);
+        var hash = SHA256.HashData(bytes);
+        return Convert.ToBase64String(hash);
     }
 
     #endregion

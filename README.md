@@ -12,6 +12,9 @@ Features
 - Email verification and password reset flows
 - Redis-backed rate limiting with in-memory fallback
 - Configurable JWT settings
+- Configurable rate limit rules and refresh token lifetime
+- Safe logging (PII only at Debug level)
+- Lightweight input validation for login/reset
 
 Quick start
 -----------
@@ -43,6 +46,37 @@ Quick start
   "TemplateSettings": {
     "BasePath": "templates"
   },
+  "RefreshTokenSettings": {
+    "RefreshTokenLifetimeDays": 30
+  },
+  "RateLimit": {
+    "Rules": {
+      "Login": {
+        "MaxUserAttempts": 5,
+        "MaxIpAttempts": 20,
+        "AttemptWindow": "00:15:00",
+        "LockDuration": "00:05:00"
+      },
+      "Register": {
+        "MaxUserAttempts": 3,
+        "MaxIpAttempts": 10,
+        "AttemptWindow": "00:30:00",
+        "LockDuration": "00:10:00"
+      },
+      "VerifyEmail": {
+        "MaxUserAttempts": 5,
+        "MaxIpAttempts": 15,
+        "AttemptWindow": "01:00:00",
+        "LockDuration": "00:15:00"
+      },
+      "ResetPassword": {
+        "MaxUserAttempts": 3,
+        "MaxIpAttempts": 10,
+        "AttemptWindow": "00:30:00",
+        "LockDuration": "00:15:00"
+      }
+    }
+  },
   "Redis": {
     "Url": "localhost:6379"
   }
@@ -52,6 +86,7 @@ Quick start
 2) Register services:
 
 ```csharp
+services.AddHttpContextAccessor(); // required for rate limiting
 services.AddAuthLibrary<MyUser>(configuration);
 
 // If you need trusted proxies for rate limiting:
@@ -67,6 +102,11 @@ services.AddScoped<IRateLimitService>(sp =>
 ```
 
 3) Implement IAuthRepository<TUser> (see below).
+
+4) Add email templates in your app:
+- templates/VerifyEmail.html
+- templates/ResetPassword.html
+  Use placeholders `{{username}}` and `{{url}}`.
 
 Repository contract (required)
 ------------------------------
@@ -151,6 +191,76 @@ public sealed class AuthRepository : IAuthRepository<MyUser>
 }
 ```
 
+Usage (Controllers or Minimal API)
+----------------------------------
+```csharp
+[ApiController]
+[Route("api/auth")]
+public class AuthController : ControllerBase
+{
+    private readonly IAuthService<MyUser> _auth;
+    private readonly ITokenService<MyUser> _token;
+
+    public AuthController(IAuthService<MyUser> auth, ITokenService<MyUser> token)
+    {
+        _auth = auth;
+        _token = token;
+    }
+
+    [HttpPost("login")]
+    public async Task<IActionResult> Login([FromBody] LoginDto body)
+    {
+        var result = await _auth.Login(body.Username, body.Password);
+        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
+    }
+
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh([FromBody] string refreshToken)
+    {
+        var result = await _token.TryRefreshToken(refreshToken);
+        return result.IsSuccess ? Ok(result.Value) : Unauthorized(result.Error);
+    }
+}
+```
+
+Configuration reference
+-----------------------
+JwtSettings
+- Key: HMAC key, minimum 32 bytes (required).
+- Issuer, Audience: used in JWT (recommended).
+- AccessTokenLifetimeMinutes: must be > 0.
+
+SecuritySettings
+- Pepper: required. Used in password hashing.
+
+MailService
+- SMTP settings for MailKit.
+
+AuthSettings
+- FrontendUrl: base URL for verify/reset links.
+
+TemplateSettings
+- BasePath: folder for HTML templates.
+
+RefreshTokenSettings
+- RefreshTokenLifetimeDays: default 30.
+
+RateLimit
+- Rules: dictionary keyed by enum name (Login, Register, VerifyEmail, ResetPassword).
+  If omitted, defaults are used.
+
+Validation rules
+----------------
+- Login: username and password required.
+- ResetPassword: token, password, confirm password required.
+- Password strength: handled by IPasswordValidator (default: length + upper/lower/digit/special).
+
+Logging
+-------
+- Email/username is logged only at Debug level.
+- Info/Warning messages are safe for production logs.
+- If Redis is unavailable, a warning is logged and in-memory fallback is used.
+
 Security notes
 --------------
 - JWT key must be at least 32 bytes.
@@ -158,6 +268,7 @@ Security notes
 - Refresh token reuse invalidates all sessions for that user.
 - Rate limiting uses Redis when available; in-memory fallback is best-effort.
 - X-Forwarded-For is honored only for trusted proxies (configure explicitly).
+- Pepper is mandatory; the library throws on startup if missing.
 
 Testing
 -------

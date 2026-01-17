@@ -134,8 +134,25 @@ public class RateLimitService : IRateLimitService
         await _redisService.SetValue(key, "1", duration);
     }
 
-    private static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildConfig()
+    public static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildConfig(RateLimitSettings? settings = null)
     {
+        var config = new Dictionary<RateLimitRequestType, RateLimitConfiguration>();
+        if (settings?.Rules != null && settings.Rules.Count > 0)
+        {
+            foreach (var entry in settings.Rules)
+            {
+                if (System.Enum.TryParse<RateLimitRequestType>(entry.Key, ignoreCase: true, out var type))
+                {
+                    config[type] = entry.Value;
+                }
+            }
+        }
+
+        if (config.Count > 0)
+        {
+            return config;
+        }
+
         return new()
         {
             {

@@ -66,6 +66,14 @@ public static class MockFactory
         };
     }
 
+    public static RefreshTokenSettings CreateRefreshTokenSettings()
+    {
+        return new RefreshTokenSettings
+        {
+            RefreshTokenLifetimeDays = 30
+        };
+    }
+
     public static MailSettings CreateMailSettings()
     {
         return new MailSettings

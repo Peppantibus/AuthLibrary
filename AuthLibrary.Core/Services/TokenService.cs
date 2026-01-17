@@ -17,12 +17,18 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     private readonly JwtSettings _jwt;
     private readonly ILogger<TokenService<TUser>> _logger;
     private readonly IAuthRepository<TUser> _repository;
+    private readonly RefreshTokenSettings _refreshTokenSettings;
 
-    public TokenService(IOptions<JwtSettings> jwtSettings, ILogger<TokenService<TUser>> logger, IAuthRepository<TUser> repository)
+    public TokenService(
+        IOptions<JwtSettings> jwtSettings,
+        ILogger<TokenService<TUser>> logger,
+        IAuthRepository<TUser> repository,
+        IOptions<RefreshTokenSettings> refreshTokenSettings)
     {
         _jwt = jwtSettings.Value;
         _logger = logger;
         _repository = repository;
+        _refreshTokenSettings = refreshTokenSettings.Value;
         
         // SECURITY: Validate JWT key configuration
         ValidateJwtConfiguration();
@@ -103,6 +109,25 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
     }
 
+    public async Task<Result<RefreshTokenDto>> TryRefreshToken(string token)
+    {
+        try
+        {
+            var dto = await RefreshToken(token);
+            return Result.Ok(dto);
+        }
+        catch (InvalidOperationException)
+        {
+            _logger.LogWarning("Refresh token non valido");
+            return Result.Fail<RefreshTokenDto>("token non valido");
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning("Errore durante il refresh token");
+            return Result.Fail<RefreshTokenDto>("errore durante il refresh token");
+        }
+    }
+
     public string GenerateRefreshToken() 
     { 
         var randomNumber = RandomNumberGenerator.GetBytes(64); 
@@ -119,7 +144,7 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             UserId = user.Id,
             TokenHash = tokenHash,
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(30),
+            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays),
             RevokedAt = null,
             ReplacedByToken = null
         };
@@ -233,7 +258,7 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             UserId = oldEntity.UserId,
             TokenHash = newTokenHash,
             CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(30)
+            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays)
         };
 
         await _repository.AddRefreshTokenAsync(newEntity);

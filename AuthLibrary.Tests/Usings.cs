@@ -1,0 +1,12 @@
+global using Xunit;
+global using Moq;
+global using FluentAssertions;
+global using Chat.AuthLibrary.Interfaces;
+global using Chat.AuthLibrary.Services;
+global using Chat.AuthLibrary.Models;
+global using Chat.AuthLibrary.Models.Dto;
+global using Chat.AuthLibrary.Models.Dto.Auth;
+global using Chat.AuthLibrary.Configuration;
+global using Chat.AuthLibrary.Enum;
+global using Microsoft.Extensions.Logging;
+global using Microsoft.Extensions.Options;

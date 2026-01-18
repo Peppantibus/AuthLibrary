@@ -1,9 +1,9 @@
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Enum;
-using Chat.AuthLibrary.Interfaces;
+using AuthLibrary.Configuration;
+using AuthLibrary.Enum;
+using AuthLibrary.Interfaces;
 using Microsoft.AspNetCore.Http;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class RateLimitService : IRateLimitService
 {

@@ -1,11 +1,11 @@
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Interfaces;
-using Chat.AuthLibrary.Models.Dto;
+using AuthLibrary.Configuration;
+using AuthLibrary.Interfaces;
+using AuthLibrary.Models.Dto;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class MailService : IMailService
 {

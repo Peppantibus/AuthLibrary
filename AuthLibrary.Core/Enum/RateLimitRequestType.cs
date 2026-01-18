@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Enum;
+namespace AuthLibrary.Enum;
 
 public enum RateLimitRequestType
 {

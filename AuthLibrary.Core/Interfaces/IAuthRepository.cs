@@ -1,6 +1,6 @@
-using Chat.AuthLibrary.Models;
+using AuthLibrary.Models;
 
-namespace Chat.AuthLibrary.Interfaces;
+namespace AuthLibrary.Interfaces;
 
 public interface IAuthRepository<TUser> where TUser : class, IAuthUser
 {

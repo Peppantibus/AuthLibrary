@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Models.Dto.Auth;
+namespace AuthLibrary.Models.Dto.Auth;
 
 public class RefreshTokenDto
 {

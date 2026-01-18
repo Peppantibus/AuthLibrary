@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Interfaces;
+namespace AuthLibrary.Interfaces;
 
 public interface IMailTemplateService
 {

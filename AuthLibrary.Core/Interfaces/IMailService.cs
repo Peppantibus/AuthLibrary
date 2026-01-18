@@ -1,6 +1,6 @@
-using Chat.AuthLibrary.Models.Dto;
+using AuthLibrary.Models.Dto;
 
-namespace Chat.AuthLibrary.Interfaces;
+namespace AuthLibrary.Interfaces;
 
 public interface IMailService
 {

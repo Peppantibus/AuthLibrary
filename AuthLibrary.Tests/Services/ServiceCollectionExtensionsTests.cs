@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using AuthLibrary.Tests.Helpers;
-using Chat.AuthLibrary.Extensions;
+using AuthLibrary.Extensions;
 
 namespace AuthLibrary.Tests.Services;
 

@@ -1,15 +1,15 @@
 using System.Security.Cryptography;
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Enum;
-using Chat.AuthLibrary.Interfaces;
-using Chat.AuthLibrary.Models;
-using Chat.AuthLibrary.Models.Dto;
-using Chat.AuthLibrary.Models.Dto.Auth;
-using Chat.AuthLibrary.Validation;
+using AuthLibrary.Configuration;
+using AuthLibrary.Enum;
+using AuthLibrary.Interfaces;
+using AuthLibrary.Models;
+using AuthLibrary.Models.Dto;
+using AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class AuthService<TUser> : IAuthService<TUser> where TUser : class, IAuthUser
 {

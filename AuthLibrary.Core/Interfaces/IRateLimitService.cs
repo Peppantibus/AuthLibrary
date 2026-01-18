@@ -1,6 +1,6 @@
-using Chat.AuthLibrary.Enum;
+using AuthLibrary.Enum;
 
-namespace Chat.AuthLibrary.Interfaces;
+namespace AuthLibrary.Interfaces;
 
 public interface IRateLimitService
 {

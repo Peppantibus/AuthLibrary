@@ -1,7 +1,7 @@
-using Chat.AuthLibrary.Models;
-using Chat.AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Models;
+using AuthLibrary.Models.Dto.Auth;
 
-namespace Chat.AuthLibrary.Validation;
+namespace AuthLibrary.Validation;
 
 public static class InputValidators
 {

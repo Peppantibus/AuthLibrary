@@ -2,15 +2,15 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Interfaces;
-using Chat.AuthLibrary.Models;
-using Chat.AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Configuration;
+using AuthLibrary.Interfaces;
+using AuthLibrary.Models;
+using AuthLibrary.Models.Dto.Auth;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAuthUser
 {

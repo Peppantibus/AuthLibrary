@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Configuration;
+namespace AuthLibrary.Configuration;
 
 public class TemplateSettings
 {

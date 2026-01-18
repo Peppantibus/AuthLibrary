@@ -1,8 +1,8 @@
-using Chat.AuthLibrary.Interfaces;
+using AuthLibrary.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 /// <summary>
 /// In-memory fallback for Redis when Redis is unavailable or not configured.

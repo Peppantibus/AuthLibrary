@@ -1,6 +1,6 @@
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Interfaces;
-using Chat.AuthLibrary.Services;
+using AuthLibrary.Configuration;
+using AuthLibrary.Interfaces;
+using AuthLibrary.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using StackExchange.Redis;
 
-namespace Chat.AuthLibrary.Extensions;
+namespace AuthLibrary.Extensions;
 
 public static class ServiceCollectionExtensions
 {

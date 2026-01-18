@@ -1,9 +1,9 @@
-using Chat.AuthLibrary.Configuration;
-using Chat.AuthLibrary.Interfaces;
+using AuthLibrary.Configuration;
+using AuthLibrary.Interfaces;
 using Microsoft.Extensions.Options;
 using System.IO;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class MailTemplateService : IMailTemplateService
 {

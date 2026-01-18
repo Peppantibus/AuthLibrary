@@ -1,7 +1,7 @@
-using Chat.AuthLibrary.Interfaces;
+using AuthLibrary.Interfaces;
 using StackExchange.Redis;
 
-namespace Chat.AuthLibrary.Services;
+namespace AuthLibrary.Services;
 
 public class RedisService : IRedisService
 {

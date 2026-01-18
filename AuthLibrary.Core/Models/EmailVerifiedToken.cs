@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Models;
+namespace AuthLibrary.Models;
 
 public class EmailVerifiedToken
 {

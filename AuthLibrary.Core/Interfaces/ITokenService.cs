@@ -1,7 +1,7 @@
-using Chat.AuthLibrary.Models;
-using Chat.AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Models;
+using AuthLibrary.Models.Dto.Auth;
 
-namespace Chat.AuthLibrary.Interfaces;
+namespace AuthLibrary.Interfaces;
 
 public interface ITokenService<TUser> where TUser : IAuthUser
 {

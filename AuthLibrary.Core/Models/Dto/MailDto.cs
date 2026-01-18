@@ -1,4 +1,4 @@
-namespace Chat.AuthLibrary.Models.Dto;
+namespace AuthLibrary.Models.Dto;
 
 public class MailDto
 {

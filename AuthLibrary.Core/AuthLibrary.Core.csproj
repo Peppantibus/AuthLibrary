@@ -6,10 +6,13 @@
     <Nullable>enable</Nullable>
     <PackageId>AuthLibrary.Core</PackageId>
     <Version>0.1.0</Version>
-    <Authors>giuse</Authors>
+    <Authors>Peppantibus</Authors>
     <Description>Lightweight authentication library for .NET with refresh token rotation, rate limiting, and email-based flows.</Description>
     <PackageTags>auth;jwt;refresh-token;rate-limit;email;dotnet</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/Peppantibus/AuthLibrary.Packages</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageProjectUrl>https://github.com/Peppantibus/AuthLibrary</PackageProjectUrl>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>1591</NoWarn>
   </PropertyGroup>

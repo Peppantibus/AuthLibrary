@@ -65,7 +65,7 @@
 - Remediation:
   - Replace per-key lock growth with bounded locking strategy.
   - Add cleanup strategy aligned with cache expiration.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-005: bound in-memory rate-limit lock growth`
 
 ### SEC-006

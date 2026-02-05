@@ -62,4 +62,36 @@ public class MailTemplateServiceTests
             Directory.Delete(tempDir, true);
         }
     }
+
+    [Fact]
+    public async Task RenderTemplateAsync_WhenPathTraversalAttempt_Throws()
+    {
+        // Arrange
+        var baseDir = Path.Combine(Path.GetTempPath(), "authlib-templates-" + Guid.NewGuid());
+        var outsideDir = Path.Combine(Path.GetTempPath(), "authlib-outside-" + Guid.NewGuid());
+        Directory.CreateDirectory(baseDir);
+        Directory.CreateDirectory(outsideDir);
+        var outsidePath = Path.Combine(outsideDir, "outside.html");
+        await File.WriteAllTextAsync(outsidePath, "Outside");
+
+        try
+        {
+            var settings = MockFactory.CreateOptions(new TemplateSettings { BasePath = baseDir });
+            var service = new MailTemplateService(settings);
+
+            // Act
+            var act = async () => await service.RenderTemplateAsync(
+                Path.Combine("..", Path.GetFileName(outsideDir), "outside.html"),
+                new Dictionary<string, string>());
+
+            // Assert
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*outside base path*");
+        }
+        finally
+        {
+            Directory.Delete(baseDir, true);
+            Directory.Delete(outsideDir, true);
+        }
+    }
 }

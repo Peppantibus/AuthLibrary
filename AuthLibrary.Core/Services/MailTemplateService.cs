@@ -16,13 +16,30 @@ public class MailTemplateService : IMailTemplateService
 
     public async Task<string> RenderTemplateAsync(string templateName, Dictionary<string, string> parameters)
     {
-        var path = Path.Combine(_basePath, templateName);
-        if (!File.Exists(path))
+        if (string.IsNullOrWhiteSpace(templateName))
         {
-            throw new FileNotFoundException($"Template not found: {path}");
+            throw new ArgumentException("Template name is required.", nameof(templateName));
+        }
+
+        if (Path.IsPathRooted(templateName))
+        {
+            throw new InvalidOperationException("Template name must be a relative path.");
+        }
+
+        var basePathFull = Path.GetFullPath(_basePath);
+        var candidatePath = Path.GetFullPath(Path.Combine(basePathFull, templateName));
+
+        if (!IsUnderBasePath(basePathFull, candidatePath))
+        {
+            throw new InvalidOperationException("Template path is outside base path.");
+        }
+
+        if (!File.Exists(candidatePath))
+        {
+            throw new FileNotFoundException($"Template not found: {candidatePath}");
         }
         
-        var template = await File.ReadAllTextAsync(path);
+        var template = await File.ReadAllTextAsync(candidatePath);
 
         foreach (var param in parameters)
         {
@@ -32,5 +49,12 @@ public class MailTemplateService : IMailTemplateService
         }
 
         return template;
+    }
+
+    private static bool IsUnderBasePath(string basePathFull, string candidatePath)
+    {
+        var normalizedBase = basePathFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        return candidatePath.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase);
     }
 }

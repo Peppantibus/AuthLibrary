@@ -81,17 +81,9 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
     public async Task<RefreshTokenDto> RefreshToken(string token)
     {
-        var result = await ValidateRefreshToken(token);
-        var userId = result.UserId;
-        
-        var queryUser = await _repository.GetUserByIdAsync(userId);
+        var (result, user) = await ValidateRefreshTokenWithUser(token);
 
-        if (queryUser == null)
-        {
-            throw new InvalidOperationException("nessun utente trovato");
-        }
-
-        var accessToken = GenerateAccessToken(queryUser);
+        var accessToken = GenerateAccessToken(user);
 
         return new RefreshTokenDto
         {
@@ -100,13 +92,12 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             AccessToken = accessToken,
             User = new UserDto
             {
-                Id = queryUser.Id,
-                Username = queryUser.Username,
-                Name = queryUser.Name,
-                LastName = queryUser.LastName,
+                Id = user.Id,
+                Username = user.Username,
+                Name = user.Name,
+                LastName = user.LastName,
             }
         };
-
     }
 
     public async Task<Result<RefreshTokenDto>> TryRefreshToken(string token)
@@ -191,7 +182,7 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         };
     }
 
-    private async Task<RefreshTokenIssueResult> ValidateRefreshToken(string token)
+    private async Task<(RefreshTokenIssueResult Result, TUser User)> ValidateRefreshTokenWithUser(string token)
     {
         var tokenHash = HashToken(token);
         var existingEntry = await _repository.GetRefreshTokenAsync(tokenHash);
@@ -221,7 +212,12 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
         // Security: Invalidate tokens created before password change
         var user = await _repository.GetUserByIdAsync(existingEntry.UserId);
-        if (user != null && user.PasswordUpdatedAt.HasValue)
+        if (user == null)
+        {
+            throw new InvalidOperationException("nessun utente trovato");
+        }
+
+        if (user.PasswordUpdatedAt.HasValue)
         {
             if (existingEntry.CreatedAt < user.PasswordUpdatedAt.Value)
             {
@@ -230,7 +226,8 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             }
         }
 
-        return await UpdateRefreshToken(existingEntry);
+        var result = await UpdateRefreshToken(existingEntry);
+        return (result, user);
     }
 
     private async Task<RefreshTokenIssueResult> UpdateRefreshToken(RefreshToken oldEntity)

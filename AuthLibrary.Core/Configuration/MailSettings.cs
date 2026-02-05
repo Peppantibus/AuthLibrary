@@ -25,4 +25,19 @@ public class MailSettings
     /// Display name for sender in emails.
     /// </summary>
     public string SenderName { get; set; } = "AuthLibrary";
+
+    /// <summary>
+    /// SMTP operation timeout in seconds (connect/auth/send). Default: 30.
+    /// </summary>
+    public int TimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Number of retry attempts on transient SMTP errors. Default: 1 (one retry).
+    /// </summary>
+    public int RetryCount { get; set; } = 1;
+
+    /// <summary>
+    /// Delay between retries in milliseconds. Default: 500.
+    /// </summary>
+    public int RetryDelayMilliseconds { get; set; } = 500;
 }

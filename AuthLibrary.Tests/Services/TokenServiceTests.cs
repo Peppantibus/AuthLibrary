@@ -391,6 +391,43 @@ public class TokenServiceTests
     }
 
     [Fact]
+    public async Task RefreshToken_WhenUserNotFound_DoesNotRotateTokenAndThrows()
+    {
+        // Arrange
+        var userId = "user-999";
+        var plainToken = "valid-token-no-user";
+        var hashedToken = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
+        );
+
+        var existingToken = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = hashedToken,
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            ExpiresAt = DateTime.UtcNow.AddDays(29),
+            RevokedAt = null,
+            ReplacedByToken = null
+        };
+
+        _repositoryMock.Setup(x => x.GetRefreshTokenAsync(It.IsAny<string>()))
+            .ReturnsAsync(existingToken);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
+            .ReturnsAsync((TestUser?)null);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken(plainToken);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*nessun utente trovato*");
+
+        _repositoryMock.Verify(x => x.UpdateRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
+        _repositoryMock.Verify(x => x.AddRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Never);
+    }
+
+    [Fact]
     public async Task TryRefreshToken_WithInvalidToken_ReturnsFailure()
     {
         // Arrange

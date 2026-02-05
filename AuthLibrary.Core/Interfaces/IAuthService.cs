@@ -12,4 +12,5 @@ public interface IAuthService<TUser> where TUser : IAuthUser
     Task<Result<bool>> ResetPassword(ResetPasswordDto body);
     Task<Result<bool>> VerifyMail(string token);
     Task<Result> ResendVerificationEmail(string email);
+    Task<Result<RefreshTokenDto>> ExternalLoginWithGoogle(string idToken);
 }

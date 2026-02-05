@@ -28,6 +28,10 @@ public interface IAuthRepository<TUser> where TUser : class, IAuthUser
     Task<RefreshToken?> GetRefreshTokenAsync(string token);
     Task UpdateRefreshTokenAsync(RefreshToken token);
     Task RemoveRefreshTokensByUserIdAsync(string userId);
+
+    // External logins (e.g., Google)
+    Task<ExternalAuthLogin?> GetExternalLoginAsync(string provider, string subject);
+    Task AddExternalLoginAsync(ExternalAuthLogin login);
     
     Task SaveChangesAsync();
 }

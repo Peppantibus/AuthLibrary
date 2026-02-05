@@ -16,10 +16,12 @@ public static class ServiceCollectionExtensions
     private sealed class RedisConnectionHolder
     {
         public IConnectionMultiplexer? Multiplexer { get; }
+        public bool RequireRedis { get; }
 
-        public RedisConnectionHolder(IConnectionMultiplexer? multiplexer)
+        public RedisConnectionHolder(IConnectionMultiplexer? multiplexer, bool requireRedis)
         {
             Multiplexer = multiplexer;
+            RequireRedis = requireRedis;
         }
     }
 
@@ -33,17 +35,23 @@ public static class ServiceCollectionExtensions
         services.Configure<TemplateSettings>(config.GetSection("TemplateSettings"));
         services.Configure<RateLimitSettings>(config.GetSection("RateLimit"));
         services.Configure<RefreshTokenSettings>(config.GetSection("RefreshTokenSettings"));
+        services.Configure<GoogleAuthSettings>(config.GetSection("GoogleAuth"));
 
         services.AddScoped<IAuthService<TUser>, AuthService<TUser>>();
         services.AddScoped<ITokenService<TUser>, TokenService<TUser>>();
         services.AddScoped<IMailService, MailService>();
         services.AddScoped<IMailTemplateService, MailTemplateService>();
+        services.AddScoped<IExternalTokenValidator, GoogleTokenValidator>();
         services.AddScoped<IRateLimitService>(sp =>
         {
             var redis = sp.GetRequiredService<IRedisService>();
             var http = sp.GetRequiredService<IHttpContextAccessor>();
             var rateLimitSettings = sp.GetRequiredService<IOptions<RateLimitSettings>>().Value;
-            return new RateLimitService(redis, http, RateLimitService.BuildConfig(rateLimitSettings));
+            return new RateLimitService(
+                redis,
+                http,
+                RateLimitService.BuildConfig(rateLimitSettings),
+                rateLimitSettings.TrustedProxyIps);
         });
         services.AddScoped<IPasswordValidator, DefaultPasswordValidator>();
         
@@ -52,6 +60,7 @@ public static class ServiceCollectionExtensions
         
         // Redis with automatic in-memory fallback
         var redisUrl = config["Redis:Url"];
+        var requireRedis = config.GetValue<bool>("RateLimit:RequireRedis");
         if (!string.IsNullOrEmpty(redisUrl))
         {
             // Try to use Redis, but fallback to memory cache if it fails
@@ -64,9 +73,12 @@ public static class ServiceCollectionExtensions
                 }
                 catch (Exception)
                 {
-                    // Redis connection failed, will use in-memory fallback
+                    if (requireRedis)
+                    {
+                        throw new InvalidOperationException("Redis è richiesto ma non disponibile.");
+                    }
                 }
-                return new RedisConnectionHolder(multiplexer);
+                return new RedisConnectionHolder(multiplexer, requireRedis);
             });
             
             services.AddScoped<IRedisService>(sp =>
@@ -76,7 +88,12 @@ public static class ServiceCollectionExtensions
                 {
                     return new RedisService(holder.Multiplexer);
                 }
-                
+
+                if (holder.RequireRedis)
+                {
+                    throw new InvalidOperationException("Redis è richiesto ma non disponibile.");
+                }
+
                 // Fallback to in-memory cache
                 var logger = sp.GetRequiredService<ILogger<RedisService>>();
                 logger.LogWarning("Redis non disponibile, uso cache in-memory per rate limiting.");

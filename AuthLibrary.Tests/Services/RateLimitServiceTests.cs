@@ -99,6 +99,22 @@ public class RateLimitServiceTests
     }
 
     [Fact]
+    public async Task RegisterAttempted_WithEmptyIdentifier_TracksOnlyIp()
+    {
+        // Arrange
+        _redisServiceMock.Setup(x => x.Increment(It.IsAny<string>(), It.IsAny<double>())).ReturnsAsync(1);
+
+        // Act
+        var result = await _rateLimitService.RegisterAttempted(RateLimitRequestType.Login, string.Empty);
+
+        // Assert
+        result.Should().BeFalse();
+        _redisServiceMock.Verify(x => x.Increment($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100", 1), Times.Once);
+        _redisServiceMock.Verify(x => x.Increment($"rl:attempt:{RateLimitRequestType.Login}:", 1), Times.Never);
+        _redisServiceMock.Verify(x => x.Expire($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100", It.IsAny<TimeSpan>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RegisterAttempted_ExceedsIpLimit_BlocksIpAndReturnsTrue()
     {
         // Arrange

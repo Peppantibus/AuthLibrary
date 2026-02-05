@@ -107,11 +107,16 @@ public class RateLimitService : IRateLimitService
     public async Task<bool> IsBlocked(RateLimitRequestType type, string identifier)
     {
         var ip = GetClientIP(identifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(identifier);
 
         string ipLockKey = $"rl:lock:{type}:ip:{ip}";
-        string userLockKey = $"rl:lock:{type}:{identifier}";
-
         var ipBlocked = await _redisService.GetValue(ipLockKey) != null;
+        if (!hasIdentifier)
+        {
+            return ipBlocked;
+        }
+
+        string userLockKey = $"rl:lock:{type}:{identifier}";
         var userBlocked = await _redisService.GetValue(userLockKey) != null;
 
         return ipBlocked || userBlocked;
@@ -126,21 +131,26 @@ public class RateLimitService : IRateLimitService
         }
 
         var ip = GetClientIP(idenfier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(idenfier);
 
         string ipAttemptKey = $"rl:attempt:{type}:ip:{ip}";
-        string identifierAttemptKey = $"rl:attempt:{type}:{idenfier}";
-
         var ipAttempts = await _redisService.Increment(ipAttemptKey, 1);
-        var identifierAttempts = await _redisService.Increment(identifierAttemptKey, 1);
+        double identifierAttempts = 0;
 
         if (ipAttempts == 1)
         {
              await _redisService.Expire(ipAttemptKey, configuration.AttemptWindow);
         }
-        
-        if (identifierAttempts == 1)
+
+        if (hasIdentifier)
         {
-             await _redisService.Expire(identifierAttemptKey, configuration.AttemptWindow);
+            string identifierAttemptKey = $"rl:attempt:{type}:{idenfier}";
+            identifierAttempts = await _redisService.Increment(identifierAttemptKey, 1);
+
+            if (identifierAttempts == 1)
+            {
+                 await _redisService.Expire(identifierAttemptKey, configuration.AttemptWindow);
+            }
         }
 
         if (ipAttempts > configuration.MaxIpAttempts)
@@ -149,7 +159,7 @@ public class RateLimitService : IRateLimitService
             return true;
         }
 
-        if (identifierAttempts > configuration.MaxUserAttempts)
+        if (hasIdentifier && identifierAttempts > configuration.MaxUserAttempts)
         {
             await _redisService.SetValue($"rl:lock:{type}:{idenfier}", "1", configuration.LockDuration);
             return true;
@@ -161,9 +171,14 @@ public class RateLimitService : IRateLimitService
     public async Task Reset(RateLimitRequestType type, string identifier)
     {
         var ip = GetClientIP(identifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(identifier);
 
         await _redisService.Remove($"rl:attempt:{type}:ip:{ip}");
-        await _redisService.Remove($"rl:attempt:{type}:{identifier}");
+
+        if (hasIdentifier)
+        {
+            await _redisService.Remove($"rl:attempt:{type}:{identifier}");
+        }
     }
 
     public async Task<bool> IsInCooldown(RateLimitRequestType type, string identifier)

@@ -28,27 +28,29 @@ internal sealed class LoginService<TUser> where TUser : class, IAuthUser
             return Result.Fail<RefreshTokenDto>(validationResult.Error);
         }
 
+        // Pre-auth throttling is IP scoped to reduce account lockout abuse.
+        var ipScopeKey = string.Empty;
         var rateLimitKey = AuthRuntime<TUser>.NormalizeIdentifier(username);
-        var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
-            RateLimitRequestType.Login,
-            rateLimitKey,
-            "utente bloccato per troppi tentativi");
-        if (rateLimitResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Login bloccato (rate limit)");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (rate limit)", username);
-            return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
-        }
-
         var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
             RateLimitRequestType.Login,
-            rateLimitKey,
+            ipScopeKey,
             "utente bloccato");
         if (blockedResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Login bloccato");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (pre-existing lock)", username);
+            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip lock pre-auth)", username);
             return Result.Fail<RefreshTokenDto>(blockedResult.Error);
+        }
+
+        var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
+            RateLimitRequestType.Login,
+            ipScopeKey,
+            "utente bloccato per troppi tentativi");
+        if (rateLimitResult.IsFailure)
+        {
+            _runtime.Logger.LogWarning("Login bloccato (rate limit)");
+            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip rate limit)", username);
+            return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
         }
 
         var user = await _runtime.Repository.GetUserByUsernameAsync(username);
@@ -82,6 +84,18 @@ internal sealed class LoginService<TUser> where TUser : class, IAuthUser
         var isValid = CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
         if (!isValid)
         {
+            // Account-specific counter increments only after confirming account existence.
+            var accountLimit = await _runtime.RateLimitGuard.RegisterAttempt(
+                RateLimitRequestType.Login,
+                rateLimitKey,
+                "utente bloccato per troppi tentativi");
+            if (accountLimit.IsFailure)
+            {
+                _runtime.Logger.LogWarning("Login bloccato (rate limit account)");
+                _runtime.Logger.LogDebug("Login bloccato per utente {username} (account rate limit)", username);
+                return Result.Fail<RefreshTokenDto>(accountLimit.Error);
+            }
+
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");
             _runtime.Logger.LogDebug("Login fallito: password errata per utente {username}", username);
             return Result.Fail<RefreshTokenDto>("Credenziali non valide");

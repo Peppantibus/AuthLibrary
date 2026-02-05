@@ -77,9 +77,9 @@ public class AuthServiceBasicTests
             .AsVerified()
             .Build();
 
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
         _repositoryMock.Setup(x => x.GetUserByUsernameAsync(username))
             .ReturnsAsync(user);
@@ -132,9 +132,11 @@ public class AuthServiceBasicTests
             .Build();
 
 
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
+            .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, username))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
         _repositoryMock.Setup(x => x.GetUserByUsernameAsync(username))
             .ReturnsAsync(user);
@@ -154,9 +156,9 @@ public class AuthServiceBasicTests
         var username = "nonexistent";
         var password = "Password123!";
 
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
         _repositoryMock.Setup(x => x.GetUserByUsernameAsync(username))
             .ReturnsAsync((TestUser?)null);
@@ -181,9 +183,9 @@ public class AuthServiceBasicTests
             .WithEmailVerified(false) // Not verified
             .Build();
 
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(false);
         _repositoryMock.Setup(x => x.GetUserByUsernameAsync(username))
             .ReturnsAsync(user);
@@ -203,7 +205,9 @@ public class AuthServiceBasicTests
         var username = "testuser";
         var password = "Password123!";
 
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, username))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
             .ReturnsAsync(true); // Rate limit reached
 
         // Act

@@ -54,7 +54,7 @@
 - Remediation:
   - Rebalance rate-limit policy to reduce account lockout abuse.
   - Separate abusive-source throttling from hard user lock behavior.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-004: reduce user-lockout dos surface in login rate limiting`
 
 ### SEC-005

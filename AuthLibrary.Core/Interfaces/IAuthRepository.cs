@@ -27,6 +27,12 @@ public interface IAuthRepository<TUser> where TUser : class, IAuthUser
     Task AddRefreshTokenAsync(RefreshToken token);
     Task<RefreshToken?> GetRefreshTokenAsync(string token);
     Task UpdateRefreshTokenAsync(RefreshToken token);
+    Task<bool> TryRotateRefreshTokenAsync(
+        string oldTokenHash,
+        string newTokenHash,
+        DateTime revokedAt,
+        DateTime newTokenCreatedAt,
+        DateTime newTokenExpiresAt);
     Task RemoveRefreshTokensByUserIdAsync(string userId);
 
     // External logins (e.g., Google)

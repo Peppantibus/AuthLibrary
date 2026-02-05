@@ -31,7 +31,7 @@
   - Add atomic rotation method in repository contract.
   - Enforce conditional update with affected rows check.
   - Use transaction/locking strategy in repository implementation guidance.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-002: introduce atomic refresh token rotation contract`
 
 ### SEC-003

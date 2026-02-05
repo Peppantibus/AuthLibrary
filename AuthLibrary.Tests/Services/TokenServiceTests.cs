@@ -226,12 +226,13 @@ public class TokenServiceTests
             .ReturnsAsync(existingToken);
         _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
             .ReturnsAsync(user);
-        _repositoryMock.Setup(x => x.UpdateRefreshTokenAsync(It.IsAny<RefreshToken>()))
-            .Returns(Task.CompletedTask);
-        _repositoryMock.Setup(x => x.AddRefreshTokenAsync(It.IsAny<RefreshToken>()))
-            .Returns(Task.CompletedTask);
-        _repositoryMock.Setup(x => x.SaveChangesAsync())
-            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _tokenService.RefreshToken(plainToken);
@@ -244,6 +245,51 @@ public class TokenServiceTests
         result.AccessToken.Token.Should().NotBeNullOrEmpty();
         result.User.Id.Should().Be(userId);
         result.User.Username.Should().Be("testuser");
+    }
+
+    [Fact]
+    public async Task RefreshToken_WithConcurrentRotation_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var userId = "user-123";
+        var plainToken = "plain-refresh-token";
+        var hashedToken = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
+        );
+
+        var user = TestDataBuilder.User()
+            .WithId(userId)
+            .WithUsername("testuser")
+            .Build();
+
+        var existingToken = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = hashedToken,
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            ExpiresAt = DateTime.UtcNow.AddDays(29),
+            RevokedAt = null,
+            ReplacedByToken = null
+        };
+
+        _repositoryMock.Setup(x => x.GetRefreshTokenAsync(It.IsAny<string>()))
+            .ReturnsAsync(existingToken);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken(plainToken);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
     }
 
     [Fact]
@@ -422,8 +468,12 @@ public class TokenServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*nessun utente trovato*");
 
-        _repositoryMock.Verify(x => x.UpdateRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
-        _repositoryMock.Verify(x => x.AddRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
+        _repositoryMock.Verify(x => x.TryRotateRefreshTokenAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()), Times.Never);
         _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Never);
     }
 

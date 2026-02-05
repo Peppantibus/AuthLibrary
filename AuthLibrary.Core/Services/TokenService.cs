@@ -234,38 +234,29 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     {
         if (oldEntity == null) { throw new InvalidOperationException("token non trovato"); }
 
-        // SECURITY: Re-fetch token to check for concurrent modification (race condition protection)
-        var currentState = await _repository.GetRefreshTokenAsync(oldEntity.TokenHash);
-        if (currentState == null || currentState.RevokedAt != null || currentState.ReplacedByToken != null)
+        string newToken = GenerateRefreshToken();
+        string newTokenHash = HashToken(newToken);
+        var now = DateTime.UtcNow;
+        var newExpiresAt = now.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays);
+
+        var rotated = await _repository.TryRotateRefreshTokenAsync(
+            oldEntity.TokenHash,
+            newTokenHash,
+            revokedAt: now,
+            newTokenCreatedAt: now,
+            newTokenExpiresAt: newExpiresAt);
+
+        if (!rotated)
         {
             _logger.LogWarning("Race condition detected: token already rotated during request, userId={userId}", oldEntity.UserId);
             throw new InvalidOperationException("token non valido");
         }
 
-        string newToken = GenerateRefreshToken();
-        string newTokenHash = HashToken(newToken);
-            
-        oldEntity.RevokedAt = DateTime.UtcNow;
-        oldEntity.ReplacedByToken = newTokenHash;
-
-        await _repository.UpdateRefreshTokenAsync(oldEntity);
-
-        var newEntity = new RefreshToken
-        {
-            UserId = oldEntity.UserId,
-            TokenHash = newTokenHash,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays)
-        };
-
-        await _repository.AddRefreshTokenAsync(newEntity);
-        await _repository.SaveChangesAsync();
-
         return new RefreshTokenIssueResult
         {
-            UserId = newEntity.UserId,
+            UserId = oldEntity.UserId,
             PlainToken = newToken,
-            ExpiresAt = newEntity.ExpiresAt
+            ExpiresAt = newExpiresAt
         };
     }
 }

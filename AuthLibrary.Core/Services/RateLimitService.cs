@@ -2,6 +2,7 @@ using AuthLibrary.Configuration;
 using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using Microsoft.AspNetCore.Http;
+using System.Net;
 
 namespace AuthLibrary.Services;
 
@@ -21,9 +22,7 @@ public class RateLimitService : IRateLimitService
         _redisService = redisService;
         _contextAccessor = contextAccessor;
         _config = config ?? BuildConfig();
-        _trustedProxyIps = trustedProxyIps == null
-            ? new HashSet<string>()
-            : new HashSet<string>(trustedProxyIps);
+        _trustedProxyIps = BuildTrustedProxySet(trustedProxyIps);
     }
 
     /// <summary>
@@ -39,25 +38,70 @@ public class RateLimitService : IRateLimitService
             return $"unknown-ip:{identifier}";
         }
 
-        // Check X-Forwarded-For header only if request came from a trusted proxy
-        var remoteIp = context.Connection.RemoteIpAddress?.ToString();
-        if (!string.IsNullOrEmpty(remoteIp) && _trustedProxyIps.Contains(remoteIp))
+        var remoteIp = NormalizeIp(context.Connection.RemoteIpAddress?.ToString());
+        if (remoteIp == null)
+        {
+            return "unknown-ip";
+        }
+
+        // Parse X-Forwarded-For only when the request originates from a trusted proxy.
+        // We walk right-to-left and pick the first non-trusted valid IP to avoid spoofed
+        // leftmost values when clients inject their own header and proxies append to it.
+        if (_trustedProxyIps.Contains(remoteIp))
         {
             var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
             if (!string.IsNullOrEmpty(forwardedFor))
             {
-                // X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2...
-                // Take the first one (leftmost) as the original client IP
-                var clientIp = forwardedFor.Split(',')[0].Trim();
-                if (!string.IsNullOrEmpty(clientIp))
+                var candidates = forwardedFor
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(NormalizeIp)
+                    .Where(ip => !string.IsNullOrEmpty(ip))
+                    .Cast<string>()
+                    .ToArray();
+
+                for (var i = candidates.Length - 1; i >= 0; i--)
                 {
-                    return clientIp;
+                    if (!_trustedProxyIps.Contains(candidates[i]))
+                    {
+                        return candidates[i];
+                    }
                 }
             }
         }
 
-        // Fall back to RemoteIpAddress
-        return string.IsNullOrEmpty(remoteIp) ? "unknown-ip" : remoteIp;
+        return remoteIp;
+    }
+
+    private static HashSet<string> BuildTrustedProxySet(IEnumerable<string>? trustedProxyIps)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (trustedProxyIps == null)
+        {
+            return set;
+        }
+
+        foreach (var proxy in trustedProxyIps)
+        {
+            var normalized = NormalizeIp(proxy);
+            if (!string.IsNullOrEmpty(normalized))
+            {
+                set.Add(normalized);
+            }
+        }
+
+        return set;
+    }
+
+    private static string? NormalizeIp(string? ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip))
+        {
+            return null;
+        }
+
+        return IPAddress.TryParse(ip.Trim(), out var parsed)
+            ? parsed.ToString()
+            : null;
     }
 
     public async Task<bool> IsBlocked(RateLimitRequestType type, string identifier)

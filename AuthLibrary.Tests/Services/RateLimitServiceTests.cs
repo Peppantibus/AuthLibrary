@@ -209,7 +209,7 @@ public class RateLimitServiceTests
     }
 
     [Fact]
-    public async Task GetClientIP_WithXForwardedForHeader_UsesFirstIP()
+    public async Task GetClientIP_WithSpoofedXForwardedFor_UsesRightmostNonTrustedIp()
     {
         // Arrange
         var identifier = "user@test.com";
@@ -219,8 +219,23 @@ public class RateLimitServiceTests
         // Act
         await _rateLimitService.IsBlocked(RateLimitRequestType.Login, identifier);
 
-        // Assert - Should use the X-Forwarded-For IP (203.0.113.1)
-        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:203.0.113.1"), Times.Once);
+        // Assert - Should ignore spoofed leftmost IP and use rightmost appended by proxy
+        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:198.51.100.1"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetClientIP_WithInvalidXForwardedFor_FallsBackToRemoteIp()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        _httpContext.Request.Headers["X-Forwarded-For"] = "not-an-ip, also-invalid";
+        _redisServiceMock.Setup(x => x.GetValue(It.IsAny<string>())).ReturnsAsync((string?)null);
+
+        // Act
+        await _rateLimitService.IsBlocked(RateLimitRequestType.Login, identifier);
+
+        // Assert - Invalid forwarded values are ignored
+        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Once);
     }
 
     [Theory]

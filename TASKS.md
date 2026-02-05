@@ -43,7 +43,7 @@
   - Enforce production-safe behavior via `RequireRedis=true`.
   - Add startup validation/fail-fast for critical mode.
   - Provide controlled failure strategy for auth endpoints when Redis is required.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-003: enforce safer redis requirement and startup validation`
 
 ### SEC-004

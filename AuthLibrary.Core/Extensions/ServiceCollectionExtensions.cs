@@ -61,6 +61,11 @@ public static class ServiceCollectionExtensions
         // Redis with automatic in-memory fallback
         var redisUrl = config["Redis:Url"];
         var requireRedis = config.GetValue<bool>("RateLimit:RequireRedis");
+        if (requireRedis && string.IsNullOrWhiteSpace(redisUrl))
+        {
+            throw new InvalidOperationException("RateLimit:RequireRedis è true ma Redis:Url non è configurato.");
+        }
+
         if (!string.IsNullOrEmpty(redisUrl))
         {
             // Try to use Redis, but fallback to memory cache if it fails
@@ -70,6 +75,10 @@ public static class ServiceCollectionExtensions
                 try
                 {
                     multiplexer = ConnectionMultiplexer.Connect(redisUrl);
+                    if (requireRedis && multiplexer?.IsConnected != true)
+                    {
+                        throw new InvalidOperationException("RateLimit:RequireRedis è true ma Redis non è raggiungibile.");
+                    }
                 }
                 catch (Exception)
                 {

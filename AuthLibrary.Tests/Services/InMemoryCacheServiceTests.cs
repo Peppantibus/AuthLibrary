@@ -101,4 +101,22 @@ public class InMemoryCacheServiceTests
         created.Should().BeFalse();
         stored.Should().Be("first");
     }
+
+    [Fact]
+    public async Task TrySetValue_WithConcurrentCalls_AllowsSingleWinner()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new InMemoryCacheService(cache);
+        var attempts = Enumerable.Range(0, 20)
+            .Select(_ => service.TrySetValue("race-key", "1", TimeSpan.FromMinutes(1)))
+            .ToArray();
+
+        // Act
+        var results = await Task.WhenAll(attempts);
+
+        // Assert
+        results.Count(x => x).Should().Be(1);
+        results.Count(x => !x).Should().Be(19);
+    }
 }

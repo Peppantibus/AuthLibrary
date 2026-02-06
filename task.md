@@ -55,7 +55,7 @@
 - Remediation:
   - Add concurrent tests for `TryStartCooldown` and `TrySetValue` race scenarios.
   - Assert single winner semantics and deterministic loser behavior.
-- Status: TODO
+- Status: DONE
 - Commit message: `add concurrency regression tests for atomic cooldown acquisition`
 
 ### REF-002

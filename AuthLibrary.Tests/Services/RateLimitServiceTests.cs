@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using AuthLibrary.Tests.Helpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
 
 using MockFactory = AuthLibrary.Tests.Helpers.MockFactory;
 
@@ -373,5 +374,32 @@ public class RateLimitServiceTests
         config.Should().ContainKey(RateLimitRequestType.VerifyEmail);
         config.Should().ContainKey(RateLimitRequestType.ResetPassword);
         config.Should().ContainKey(RateLimitRequestType.ExternalLogin);
+    }
+
+    [Fact]
+    public async Task TryStartCooldown_WithConcurrentCalls_AllowsSingleWinner()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var redis = new InMemoryCacheService(cache);
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
+        var accessor = new Mock<IHttpContextAccessor>();
+        accessor.Setup(x => x.HttpContext).Returns(context);
+
+        var service = new RateLimitService(redis, accessor.Object);
+        var attempts = Enumerable.Range(0, 20)
+            .Select(_ => service.TryStartCooldown(
+                RateLimitRequestType.ExternalLogin,
+                "same-key",
+                TimeSpan.FromMinutes(1)))
+            .ToArray();
+
+        // Act
+        var results = await Task.WhenAll(attempts);
+
+        // Assert
+        results.Count(x => x).Should().Be(1);
+        results.Count(x => !x).Should().Be(19);
     }
 }

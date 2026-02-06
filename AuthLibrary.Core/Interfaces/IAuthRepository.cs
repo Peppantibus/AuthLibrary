@@ -2,6 +2,13 @@ using AuthLibrary.Models;
 
 namespace AuthLibrary.Interfaces;
 
+/// <summary>
+/// Storage contract for AuthLibrary.
+/// SECURITY REQUIREMENTS for implementers:
+/// - Enforce unique constraints on user email and username at DB level.
+/// - Treat user Id as server-owned (do not trust client-provided identifiers).
+/// - Execute multi-step token/user updates inside a transaction boundary.
+/// </summary>
 public interface IAuthRepository<TUser> where TUser : class, IAuthUser
 {
     Task<TUser?> GetUserByUsernameAsync(string username);

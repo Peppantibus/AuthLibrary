@@ -128,5 +128,5 @@
 - Remediation:
   - Add explicit guidance for unique indexes, transactional boundaries, and server-side ID ownership.
   - Document logging privacy expectations and HTTPS requirement for frontend auth URLs.
-- Status: TODO
+- Status: DONE
 - Commit message: `document security-critical integration constraints for consumers`

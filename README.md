@@ -126,6 +126,15 @@ interface includes methods to:
 - Store/rotate refresh tokens (atomic rotation contract)
 - Store/retrieve external logins (e.g., Google)
 
+Security-critical integration requirements
+-----------------------------------------
+- Enforce unique DB constraints/indexes for username and email.
+- Treat `TUser.Id` as server-owned; do not trust client-provided IDs.
+- Keep refresh token rotation atomic (`TryRotateRefreshTokenAsync`) using a transaction/conditional update.
+- Use transaction boundaries for multi-step flows (`ITransactionalAuthRepository<TUser>` recommended).
+- Keep `AuthSettings:FrontendUrl` on HTTPS in production (HTTP only for local loopback development).
+- Avoid PII in production logs (emails/usernames only at Debug level).
+
 Example skeleton (EF Core style)
 --------------------------------
 ```csharp

@@ -110,5 +110,5 @@
 - Remediation:
   - Fix feed mapping/authentication for private source used in restore/audit.
   - Ensure `dotnet restore` and vulnerability scan run consistently in CI/local.
-- Status: TODO
+- Status: DONE
 - Commit message: `restore reliable dependency audit by fixing private feed configuration`

@@ -10,11 +10,14 @@ namespace AuthLibrary.Services;
 
 internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : class, IAuthUser
 {
+    private static readonly byte[] MissingUserSalt = RandomNumberGenerator.GetBytes(16);
     private readonly AuthRuntime<TUser> _runtime;
+    private readonly byte[] _missingUserHash;
 
     public LoginService(AuthRuntime<TUser> runtime)
     {
         _runtime = runtime;
+        _missingUserHash = _runtime.HashPassword("invalid-password", MissingUserSalt);
     }
 
     public async Task<Result<RefreshTokenDto>> Login(string username, string password)
@@ -51,8 +54,8 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         if (!userExists)
         {
             // Keep a comparable crypto path for unknown users to reduce timing side-channels.
-            saltBytes = RandomNumberGenerator.GetBytes(16);
-            storedHash = _runtime.HashPassword("invalid-password", saltBytes);
+            saltBytes = MissingUserSalt;
+            storedHash = _missingUserHash;
         }
         else
         {

@@ -117,7 +117,7 @@
 - Remediation:
   - Add tests that compare execution envelopes for invalid-user vs invalid-password scenarios.
   - Keep assertions stable using coarse timing thresholds and repeated sampling.
-- Status: TODO
+- Status: DONE
 - Commit message: `add regression tests for timing-safe login failures`
 
 ### REF-002

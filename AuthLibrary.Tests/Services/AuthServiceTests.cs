@@ -1,4 +1,5 @@
 using AuthLibrary.Tests.Helpers;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -147,6 +148,70 @@ public class AuthServiceBasicTests
         // Assert
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().Contain("Credenziali non valide");
+    }
+
+    [Fact]
+    public async Task Login_NegativePaths_HaveComparableTimingEnvelope()
+    {
+        // Arrange
+        var existingUsername = "existing-user";
+        var missingUsername = "missing-user";
+        var wrongPassword = "WrongPassword123!";
+        var correctPassword = "CorrectPassword123!";
+        var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        var saltBytes = Convert.FromBase64String(salt);
+        var pepper = _securitySettings.Value.Pepper;
+        var passwordHash = GenerateArgon2Hash(correctPassword, saltBytes, pepper);
+        var user = TestDataBuilder.User()
+            .WithUsername(existingUsername)
+            .WithPassword(passwordHash)
+            .WithSalt(salt)
+            .AsVerified()
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, string.Empty))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, string.Empty))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, existingUsername))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.GetUserByUsernameAsync(existingUsername))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.GetUserByUsernameAsync(missingUsername))
+            .ReturnsAsync((TestUser?)null);
+
+        static async Task<long> MeasureAverageTicks(Func<Task> action, int iterations)
+        {
+            var sw = new Stopwatch();
+            long total = 0;
+            for (var i = 0; i < iterations; i++)
+            {
+                sw.Restart();
+                await action();
+                sw.Stop();
+                total += sw.ElapsedTicks;
+            }
+
+            return total / iterations;
+        }
+
+        // Warm-up
+        await _authService.Login(existingUsername, wrongPassword);
+        await _authService.Login(missingUsername, wrongPassword);
+
+        // Act
+        var wrongPasswordTicks = await MeasureAverageTicks(
+            () => _authService.Login(existingUsername, wrongPassword),
+            iterations: 3);
+        var missingUserTicks = await MeasureAverageTicks(
+            () => _authService.Login(missingUsername, wrongPassword),
+            iterations: 3);
+
+        // Assert (coarse envelope to reduce flakiness on shared CI nodes)
+        missingUserTicks.Should().BeGreaterThan(0);
+        wrongPasswordTicks.Should().BeGreaterThan(0);
+        var ratio = (double)missingUserTicks / wrongPasswordTicks;
+        ratio.Should().BeGreaterThan(0.5).And.BeLessThan(2.5);
     }
 
     [Fact]

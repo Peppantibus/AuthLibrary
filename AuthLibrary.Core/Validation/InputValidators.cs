@@ -57,12 +57,8 @@ public static class InputValidators
             return Result.Fail("token obbligatorio");
         }
 
-        if (body.Token.Length < MinTokenLength || body.Token.Length > MaxTokenLength)
-        {
-            return Result.Fail("token non valido");
-        }
-
-        if (!TokenRegex.IsMatch(body.Token))
+        var tokenValidation = ValidateToken(body.Token);
+        if (tokenValidation.IsFailure)
         {
             return Result.Fail("token non valido");
         }
@@ -85,6 +81,26 @@ public static class InputValidators
         if (body.ConfirmPassword.Length > MaxPasswordLength)
         {
             return Result.Fail("confirm password troppo lunga");
+        }
+
+        return Result.Ok();
+    }
+
+    public static Result ValidateToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Result.Fail("token non valido");
+        }
+
+        if (token.Length < MinTokenLength || token.Length > MaxTokenLength)
+        {
+            return Result.Fail("token non valido");
+        }
+
+        if (!TokenRegex.IsMatch(token))
+        {
+            return Result.Fail("token non valido");
         }
 
         return Result.Ok();

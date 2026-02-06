@@ -1157,6 +1157,21 @@ public class AuthServiceBasicTests
         _repositoryMock.Verify(x => x.UpdateUserAsync(It.IsAny<TestUser>()), Times.Never);
     }
 
+    [Fact]
+    public async Task VerifyMail_WithMalformedToken_ReturnsFalseWithoutRepositoryLookup()
+    {
+        // Arrange
+        var token = "bad token";
+
+        // Act
+        var result = await _authService.VerifyMail(token);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeFalse();
+        _repositoryMock.Verify(x => x.GetEmailVerifiedTokenAsync(It.IsAny<string>()), Times.Never);
+    }
+
     #endregion
 
     #region Password Recovery Tests
@@ -1293,6 +1308,21 @@ public class AuthServiceBasicTests
         result.Value.Should().BeFalse();
         _repositoryMock.Verify(x => x.RemovePasswordResetTokenAsync(entry), Times.Once);
         _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResetPasswordRedirect_WithMalformedToken_ReturnsFalseWithoutRepositoryLookup()
+    {
+        // Arrange
+        var token = "bad token";
+
+        // Act
+        var result = await _authService.ResetPasswordRedirect(token);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeFalse();
+        _repositoryMock.Verify(x => x.GetPasswordResetTokenAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

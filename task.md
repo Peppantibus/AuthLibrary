@@ -92,7 +92,7 @@
   - Add lightweight token length/charset checks before hashing and repository lookup.
   - Return uniform negative outcome for malformed token input.
   - Add tests for malformed token rejection path.
-- Status: TODO
+- Status: DONE
 - Commit message: `prevalidate tokens in verify and redirect flows`
 
 ### SEC-008

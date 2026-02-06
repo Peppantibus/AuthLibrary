@@ -93,6 +93,13 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
 
     public async Task<Result<bool>> VerifyMail(string token)
     {
+        var tokenValidation = InputValidators.ValidateToken(token);
+        if (tokenValidation.IsFailure)
+        {
+            _runtime.Logger.LogWarning("VerifyMail: token non valido");
+            return Result.Ok(false);
+        }
+
         var tokenHash = AuthRuntime<TUser>.HashToken(token);
         var entry = await _runtime.Repository.GetEmailVerifiedTokenAsync(tokenHash);
         if (entry == null)

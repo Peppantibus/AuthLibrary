@@ -98,6 +98,13 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
 
     public async Task<Result<bool>> ResetPasswordRedirect(string token)
     {
+        var tokenValidation = InputValidators.ValidateToken(token);
+        if (tokenValidation.IsFailure)
+        {
+            _runtime.Logger.LogWarning("ResetPassword: token non valido");
+            return Result.Ok(false);
+        }
+
         var tokenHash = AuthRuntime<TUser>.HashToken(token);
         var entry = await _runtime.Repository.GetPasswordResetTokenAsync(tokenHash);
         if (entry == null)

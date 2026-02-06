@@ -40,7 +40,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         {
             _runtime.Logger.LogWarning("Login bloccato");
             _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip policy pre-auth)", username);
-            return Result.Fail<RefreshTokenDto>(preAuthRateLimit.Error);
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserBlocked, preAuthRateLimit.Error);
         }
 
         var user = await _runtime.Repository.GetUserByUsernameAsync(username);
@@ -48,14 +48,14 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         {
             _runtime.Logger.LogWarning("Login fallito: utente non trovato");
             _runtime.Logger.LogDebug("Login fallito: utente {username} non trovato", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 
         if (!user.EmailVerified)
         {
             _runtime.Logger.LogWarning("Login fallito: email non verificata");
             _runtime.Logger.LogDebug("Login fallito: email non verificata per utente {username}", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 
         byte[] storedHash;
@@ -67,7 +67,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         }
         catch
         {
-            return Result.Fail<RefreshTokenDto>("Errore dati utente");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserDataInvalid);
         }
 
         var testHashed = _runtime.HashPassword(password, saltBytes);
@@ -83,12 +83,12 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             {
                 _runtime.Logger.LogWarning("Login bloccato (rate limit account)");
                 _runtime.Logger.LogDebug("Login bloccato per utente {username} (account rate limit)", username);
-                return Result.Fail<RefreshTokenDto>(accountLimit.Error);
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, accountLimit.Error);
             }
 
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");
             _runtime.Logger.LogDebug("Login fallito: password errata per utente {username}", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 
         var accessToken = _runtime.TokenService.GenerateAccessToken(user);

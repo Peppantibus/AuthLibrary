@@ -25,29 +25,29 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         }
         catch (InvalidOperationException ex)
         {
-            return Result.Fail<RefreshTokenDto>(ex.Message);
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken, ex.Message);
         }
         catch
         {
-            return Result.Fail<RefreshTokenDto>("token non valido");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
         }
 
         if (!externalUser.EmailVerified)
         {
-            return Result.Fail<RefreshTokenDto>("email non verificata");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.EmailNotVerified);
         }
 
         var email = AuthRuntime<TUser>.NormalizeEmail(externalUser.Email);
         if (string.IsNullOrWhiteSpace(email))
         {
-            return Result.Fail<RefreshTokenDto>("email non valida");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidEmail);
         }
 
         var replayKey = AuthRuntime<TUser>.HashToken(idToken);
         if (await _runtime.RateLimitService.IsInCooldown(RateLimitRequestType.ExternalLogin, replayKey))
         {
             _runtime.Logger.LogWarning("Google id_token replay rilevato");
-            return Result.Fail<RefreshTokenDto>("token non valido");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
         }
 
         var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
@@ -58,7 +58,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Login Google bloccato (rate limit)");
-            return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
         const string provider = "google";
@@ -70,7 +70,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             user = await _runtime.Repository.GetUserByIdAsync(externalLogin.UserId);
             if (user == null)
             {
-                return Result.Fail<RefreshTokenDto>("utente non valido");
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidUser);
             }
         }
         else
@@ -78,7 +78,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             var existingByEmail = await _runtime.Repository.GetUserByEmailAsync(email);
             if (existingByEmail != null)
             {
-                return Result.Fail<RefreshTokenDto>("account già esistente, collega google");
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.ExternalAccountExists);
             }
 
             try
@@ -102,7 +102,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             catch (Exception ex)
             {
                 _runtime.Logger.LogError(ex, "Creazione utente esterno fallita");
-                return Result.Fail<RefreshTokenDto>("impossibile creare utente");
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserCreationFailed);
             }
         }
 
@@ -147,7 +147,6 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             return TimeSpan.FromMinutes(1);
         }
 
-        // Keep a minimum floor to avoid edge cases with clock skew.
         return ttl < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : ttl;
     }
 

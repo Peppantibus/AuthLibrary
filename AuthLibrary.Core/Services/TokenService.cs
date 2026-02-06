@@ -110,12 +110,12 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         catch (InvalidOperationException)
         {
             _logger.LogWarning("Refresh token non valido");
-            return Result.Fail<RefreshTokenDto>("token non valido");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
         }
         catch (Exception)
         {
             _logger.LogWarning("Errore durante il refresh token");
-            return Result.Fail<RefreshTokenDto>("errore durante il refresh token");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.TokenRefreshError);
         }
     }
 

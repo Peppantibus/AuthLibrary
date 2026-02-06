@@ -130,7 +130,7 @@
 - Action:
   - Introduce typed error codes and message mapping.
 - Benefit: Stable API contracts and better observability/localization.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-004: introduce typed error codes for auth flows`
 
 ### REF-005

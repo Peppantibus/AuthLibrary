@@ -4,9 +4,10 @@ public class Result
 {
     public bool IsSuccess { get; }
     public string Error { get; }
+    public string? ErrorCode { get; }
     public bool IsFailure => !IsSuccess;
 
-    protected Result(bool isSuccess, string error)
+    protected Result(bool isSuccess, string error, string? errorCode = null)
     {
         if (isSuccess && error != string.Empty)
             throw new InvalidOperationException();
@@ -15,16 +16,17 @@ public class Result
 
         IsSuccess = isSuccess;
         Error = error;
+        ErrorCode = errorCode;
     }
 
-    public static Result Fail(string message)
+    public static Result Fail(string message, string? errorCode = null)
     {
-        return new Result(false, message);
+        return new Result(false, message, errorCode);
     }
 
-    public static Result<T> Fail<T>(string message)
+    public static Result<T> Fail<T>(string message, string? errorCode = null)
     {
-        return new Result<T>(default!, false, message);
+        return new Result<T>(default!, false, message, errorCode);
     }
 
     public static Result Ok()
@@ -42,8 +44,8 @@ public class Result<T> : Result
 {
     public T Value { get; }
 
-    protected internal Result(T value, bool isSuccess, string error)
-        : base(isSuccess, error)
+    protected internal Result(T value, bool isSuccess, string error, string? errorCode = null)
+        : base(isSuccess, error, errorCode)
     {
         Value = value;
     }

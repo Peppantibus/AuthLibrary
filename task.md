@@ -80,7 +80,7 @@
   - Replace legacy HTTP abstractions with supported versions aligned with target framework.
   - Regenerate assets/lock and verify no transitive downgrade remains.
   - Run full auth/security regression suite after package upgrade.
-- Status: TODO
+- Status: DONE
 - Commit message: `upgrade legacy aspnetcore http dependencies`
 
 ### SEC-007

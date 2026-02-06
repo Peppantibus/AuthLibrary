@@ -55,89 +55,101 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
         }
 
-        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
-            RateLimitRequestType.Login,
-            email,
-            "utente bloccato",
-            "utente bloccato per troppi tentativi");
-        if (rateLimitResult.IsFailure)
+        var releaseReplayLock = true;
+        try
         {
-            _runtime.Logger.LogWarning("Login Google bloccato (rate limit)");
-            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, rateLimitResult.Error);
-        }
-
-        const string provider = "google";
-        var externalLogin = await _runtime.Repository.GetExternalLoginAsync(provider, externalUser.Subject);
-
-        TUser? user;
-        if (externalLogin != null)
-        {
-            user = await _runtime.Repository.GetUserByIdAsync(externalLogin.UserId);
-            if (user == null)
+            var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
+                RateLimitRequestType.Login,
+                email,
+                "utente bloccato",
+                "utente bloccato per troppi tentativi");
+            if (rateLimitResult.IsFailure)
             {
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidUser);
-            }
-        }
-        else
-        {
-            var existingByEmail = await _runtime.Repository.GetUserByEmailAsync(email);
-            if (existingByEmail != null)
-            {
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.ExternalAccountExists);
+                _runtime.Logger.LogWarning("Login Google bloccato (rate limit)");
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, rateLimitResult.Error);
             }
 
-            try
+            const string provider = "google";
+            var externalLogin = await _runtime.Repository.GetExternalLoginAsync(provider, externalUser.Subject);
+
+            TUser? user;
+            if (externalLogin != null)
             {
-                user = CreateUserFromExternal(externalUser, email);
-                var login = new ExternalAuthLogin
+                user = await _runtime.Repository.GetUserByIdAsync(externalLogin.UserId);
+                if (user == null)
                 {
-                    Provider = provider,
-                    Subject = externalUser.Subject,
-                    UserId = user.Id,
-                    CreatedAt = DateTime.UtcNow
-                };
+                    return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidUser);
+                }
+            }
+            else
+            {
+                var existingByEmail = await _runtime.Repository.GetUserByEmailAsync(email);
+                if (existingByEmail != null)
+                {
+                    return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.ExternalAccountExists);
+                }
 
+                try
+                {
+                    user = CreateUserFromExternal(externalUser, email);
+                    var login = new ExternalAuthLogin
+                    {
+                        Provider = provider,
+                        Subject = externalUser.Subject,
+                        UserId = user.Id,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    await ExecuteInTransaction(async () =>
+                    {
+                        await _runtime.Repository.AddUserAsync(user);
+                        await _runtime.Repository.AddExternalLoginAsync(login);
+                        await _runtime.Repository.SaveChangesAsync();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    _runtime.Logger.LogError(ex, "Creazione utente esterno fallita");
+                    return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserCreationFailed);
+                }
+            }
+
+            if (!user.EmailVerified)
+            {
+                user.EmailVerified = true;
                 await ExecuteInTransaction(async () =>
                 {
-                    await _runtime.Repository.AddUserAsync(user);
-                    await _runtime.Repository.AddExternalLoginAsync(login);
+                    await _runtime.Repository.UpdateUserAsync(user);
                     await _runtime.Repository.SaveChangesAsync();
                 });
             }
-            catch (Exception ex)
-            {
-                _runtime.Logger.LogError(ex, "Creazione utente esterno fallita");
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserCreationFailed);
-            }
-        }
 
-        if (!user.EmailVerified)
-        {
-            user.EmailVerified = true;
-            await ExecuteInTransaction(async () =>
+            var accessToken = _runtime.TokenService.GenerateAccessToken(user);
+            var refreshToken = await _runtime.TokenService.CreateRefreshToken(user);
+            await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, email);
+            releaseReplayLock = false;
+
+            return Result.Ok(new RefreshTokenDto
             {
-                await _runtime.Repository.UpdateUserAsync(user);
-                await _runtime.Repository.SaveChangesAsync();
+                NewRefreshToken = refreshToken.PlainToken,
+                RefreshTokenExpiresAt = refreshToken.ExpiresAt,
+                AccessToken = accessToken,
+                User = new UserDto
+                {
+                    Id = user.Id,
+                    Username = user.Username,
+                    Name = user.Name,
+                    LastName = user.LastName
+                }
             });
         }
-
-        var accessToken = _runtime.TokenService.GenerateAccessToken(user);
-        var refreshToken = await _runtime.TokenService.CreateRefreshToken(user);
-        await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, email);
-
-        return Result.Ok(new RefreshTokenDto
+        finally
         {
-            NewRefreshToken = refreshToken.PlainToken,
-            RefreshTokenExpiresAt = refreshToken.ExpiresAt,
-            AccessToken = accessToken,
-            User = new UserDto
+            if (releaseReplayLock)
             {
-                Id = user.Id,
-                Username = user.Username,
-                Name = user.Name,
-                LastName = user.LastName
+                await _runtime.RateLimitService.ClearCooldown(RateLimitRequestType.ExternalLogin, replayKey);
             }
-        });
+        }
     }
 
     private static TimeSpan BuildReplayWindow(DateTime expiresAtUtc)

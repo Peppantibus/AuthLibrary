@@ -199,6 +199,12 @@ public class RateLimitService : IRateLimitService
         return await _redisService.TrySetValue(key, "1", duration);
     }
 
+    public async Task ClearCooldown(RateLimitRequestType type, string identifier)
+    {
+        string key = $"rl:cooldown:{type}:{identifier}";
+        await _redisService.Remove(key);
+    }
+
     public static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildConfig(RateLimitSettings? settings = null)
     {
         var config = BuildDefaultConfig();

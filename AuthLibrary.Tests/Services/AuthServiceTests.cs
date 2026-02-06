@@ -499,6 +499,75 @@ public class AuthServiceBasicTests
         _tokenServiceMock.Verify(x => x.GenerateAccessToken(It.IsAny<TestUser>()), Times.Never);
     }
 
+    [Fact]
+    public async Task ExternalLoginWithGoogle_WhenFirstAttemptRateLimited_ReleasesReplayLockAndAllowsRetry()
+    {
+        // Arrange
+        var idToken = "transient-rate-limit-token";
+        var replayKey = HashToken(idToken);
+        var externalUser = new ExternalUserInfo
+        {
+            Subject = "google-subject-retry",
+            Email = "retry@example.com",
+            EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+            GivenName = "Retry",
+            FamilyName = "User"
+        };
+
+        _externalTokenValidatorMock
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
+            .ReturnsAsync(externalUser);
+
+        _rateLimitServiceMock
+            .SetupSequence(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(true);
+        _rateLimitServiceMock
+            .Setup(x => x.ClearCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
+            .Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "retry@example.com"))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.SetupSequence(x => x.RegisterAttempted(RateLimitRequestType.Login, "retry@example.com"))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "retry@example.com"))
+            .Returns(Task.CompletedTask);
+
+        var user = TestDataBuilder.User()
+            .WithEmail("retry@example.com")
+            .WithUsername("retry@example.com")
+            .AsVerified()
+            .Build();
+        _repositoryMock.Setup(x => x.GetExternalLoginAsync("google", "google-subject-retry"))
+            .ReturnsAsync(new ExternalAuthLogin { Provider = "google", Subject = "google-subject-retry", UserId = user.Id });
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(user.Id))
+            .ReturnsAsync(user);
+
+        var expectedAccessToken = new AccessTokenResult { Token = "jwt-token", ExpiresInSeconds = 900 };
+        var expectedRefreshToken = new RefreshTokenIssueResult
+        {
+            PlainToken = "refresh-token",
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            UserId = user.Id
+        };
+        _tokenServiceMock.Setup(x => x.GenerateAccessToken(user))
+            .Returns(expectedAccessToken);
+        _tokenServiceMock.Setup(x => x.CreateRefreshToken(user))
+            .ReturnsAsync(expectedRefreshToken);
+
+        // Act
+        var first = await _authService.ExternalLoginWithGoogle(idToken);
+        var second = await _authService.ExternalLoginWithGoogle(idToken);
+
+        // Assert
+        first.IsSuccess.Should().BeFalse();
+        second.IsSuccess.Should().BeTrue(second.Error);
+        _rateLimitServiceMock.Verify(
+            x => x.ClearCooldown(RateLimitRequestType.ExternalLogin, replayKey),
+            Times.Once);
+    }
+
     #endregion
 
     #region Configuration Tests

@@ -12,103 +12,70 @@
 
 ### SEC-001
 - Priority: ALTA
-- Area: `AuthLibrary.Core/Interfaces/IRateLimitService.cs`, `AuthLibrary.Core/Services/RedisService.cs`, `AuthLibrary.Core/Services/ExternalLoginService.cs`
-- Problem: Google login replay guard is not atomic (TOCTOU between cooldown check and set).
-- Impact: Concurrent requests with same `id_token` can both pass replay protection.
+- Area: `AuthLibrary.Core/Services/ExternalLoginService.cs`, `AuthLibrary.Core/Services/RateLimitService.cs`
+- Problem: Google replay lock is acquired too early and not released on internal failures.
+- Impact: Legitimate retries with same `id_token` can be rejected after transient backend failures.
 - Remediation:
-  - Introduce atomic replay lock (`SET NX EX`) for Redis implementation.
-  - Add equivalent atomic behavior in in-memory fallback.
-  - Replace `IsInCooldown`/`StartCooldown` pair with a single atomic acquire API in external login flow.
+  - Ensure replay lock is not consumed permanently on non-security failures.
+  - Add controlled lock release or two-phase in-flight/finalized replay strategy.
+  - Keep replay rejection deterministic for true replays.
 - Status: DONE
-- Commit message: `enforce atomic replay lock for google external login`
+- Commit message: `prevent replay lock consumption on transient external login failures`
 
 ### SEC-002
-- Priority: ALTA
-- Area: `AuthLibrary.Core/Services/RateLimitService.cs`, `AuthLibrary.Core/Configuration/AuthLibraryOptionsValidator.cs`
-- Problem: Partial rate-limit configuration can trigger runtime exceptions when required enum rules are missing.
-- Impact: Service can crash at runtime instead of safe fallback behavior.
-- Remediation:
-  - Merge default rate-limit rules with user overrides.
-  - Add startup validation to ensure all required `RateLimitRequestType` entries exist.
-  - Fail early with clear diagnostics when config is invalid.
-- Status: DONE
-- Commit message: `harden rate-limit config merge and startup validation`
-
-### SEC-03
-- Priority: ALTA
-- Area: `AuthLibrary.Core/Extensions/ServiceCollectionExtensions.cs`
-- Problem: Redis fail-fast is only partial; startup validation does not eagerly verify real connection.
-- Impact: App can start and fail on first auth request in critical Redis-required mode.
-- Remediation:
-  - Add real eager connection/health-check during bootstrap when Redis is required.
-  - Ensure startup fails deterministically if Redis is unavailable.
-- Status: DONE
-- Commit message: `make redis startup fail-fast eager and deterministic`
-
-### SEC-004
 - Priority: MEDIA
 - Area: `AuthLibrary.Core/Services/EmailVerificationService.cs`
-- Problem: Resend verification flow is still distinguishable for already-verified accounts (rate-limit/cooldown transitions differ).
-- Impact: Residual account-state enumeration signal.
+- Problem: Resend flow still leaks account state under mail/template/rate-limit internal failures.
+- Impact: Residual account enumeration signal in degraded conditions.
 - Remediation:
-  - Apply same anti-enumeration transitions for already-verified users.
-  - Keep user-facing response semantics uniform across outcomes.
-- Status: DONE
-- Commit message: `normalize resend rate-limit transitions for anti-enumeration`
+  - Keep uniform external response semantics across all resend outcomes.
+  - Apply consistent transition behavior and avoid distinguishable failure outputs.
+  - Move details to logs/telemetry only.
+- Status: TODO
+- Commit message: `enforce uniform resend behavior under internal failures`
 
-### SEC-005
+### SEC-003
 - Priority: MEDIA
-- Area: `AuthLibrary.Core/Services/RegisterService.cs`, `AuthLibrary.Core/Validation/InputValidators.cs`
-- Problem: Registration flow does not apply new `ValidateEmail`/`ValidateUsername` checks before expensive operations.
-- Impact: Malformed input can reach rate-limit and repository paths with inconsistent errors.
+- Area: `AuthLibrary.Core/Services/PasswordService.cs`
+- Problem: Recovery flow returns different outcomes for existing vs non-existing accounts when email dispatch fails.
+- Impact: Account existence can be inferred during mail subsystem faults.
 - Remediation:
-  - Validate email and username in `AddUser` before rate-limit/repository calls.
-  - Add null checks on `user` and return typed failures consistently.
-- Status: DONE
-- Commit message: `enforce registration input hardening before persistence`
+  - Return same generic response in recovery regardless of account existence and internal mail errors.
+  - Preserve internal diagnostics without exposing state differences.
+- Status: TODO
+- Commit message: `normalize recovery response semantics during email failures`
 
 ## Reliability & Refactoring Tasks
 
 ### REF-001
 - Priority: MEDIA
-- Area: `AuthLibrary.Core/Services/EmailVerificationService.cs`, `AuthLibrary.Tests/Services/AuthServiceTests.cs`
-- Problem: `VerifyMail` can return success (`true`) when token is valid but user no longer exists.
-- Impact: Incorrect verification outcome and stale-token behavior.
+- Area: `AuthLibrary.Tests/Services/RateLimitServiceTests.cs`, `AuthLibrary.Tests/Services/InMemoryCacheServiceTests.cs`
+- Problem: Atomic cooldown/replay behavior is tested only in sequential scenarios.
+- Impact: Concurrency regressions can slip through unnoticed.
 - Remediation:
-  - If `user == null`, invalidate token and return `Result.Ok(false)` or typed `InvalidUser`.
-  - Add dedicated regression test coverage.
-- Status: DONE
-- Commit message: `fix verifymail behavior for missing user and add tests`
+  - Add concurrent tests for `TryStartCooldown` and `TrySetValue` race scenarios.
+  - Assert single winner semantics and deterministic loser behavior.
+- Status: TODO
+- Commit message: `add concurrency regression tests for atomic cooldown acquisition`
 
 ### REF-002
 - Priority: MEDIA
-- Area: `AuthLibrary.Core/Services/EmailVerificationService.cs`, `AuthLibrary.Core/Services/PasswordService.cs`
-- Problem: Email send failures in resend/recovery paths can propagate exceptions.
-- Impact: Unhandled failures and inconsistent error contracts.
+- Area: `AuthLibrary.Tests/Services/AuthServiceTests.cs`
+- Problem: Missing regression test for external login retry after transient internal failure.
+- Impact: Replay policy changes may break legitimate retry behavior silently.
 - Remediation:
-  - Add robust exception handling around email dispatch in resend/recovery flows.
-  - Return typed failures with stable error code semantics.
-- Status: DONE
-- Commit message: `harden email send error handling in resend and recovery`
+  - Add test covering first attempt failing after lock acquisition and second attempt behavior.
+  - Assert expected policy explicitly (allow retry or reject by design).
+- Status: TODO
+- Commit message: `add external login retry policy regression coverage`
 
 ### REF-003
-- Priority: MEDIA
-- Area: `README.md`, `AuthLibrary.Core/Services/RegisterService.cs`, `AuthLibrary.Core/Services/EmailVerificationService.cs`, `AuthLibrary.Core/Services/PasswordService.cs`
-- Problem: Documentation claims stable `ErrorCode` for all failures, but some flows still use untyped `Result.Fail(...)`.
-- Impact: Regressive public contract and integration ambiguity.
+- Priority: BASSA
+- Area: `nuget.config`, `.gitignore`
+- Problem: Tracked `nuget.config` can accidentally include credentials.
+- Impact: Potential token leakage risk during local edits and commits.
 - Remediation:
-  - Align implementation to typed errors across remaining flows or adjust README contract explicitly.
-  - Ensure docs and runtime behavior match.
-- Status: DONE
-- Commit message: `align errorcode contract across docs and service failures`
-
-### REF-004
-- Priority: MEDIA
-- Area: `nuget.config`
-- Problem: Dependency audit is blocked by private feed resolution/auth issue (`NU1301`).
-- Impact: Vulnerability scan is unreliable and cannot be used as release gate.
-- Remediation:
-  - Fix feed mapping/authentication for private source used in restore/audit.
-  - Ensure `dotnet restore` and vulnerability scan run consistently in CI/local.
-- Status: DONE
-- Commit message: `restore reliable dependency audit by fixing private feed configuration`
+  - Introduce safe config strategy (`nuget.config.example` + local override) or enforce credential scanning guard.
+  - Document recommended local setup for private feeds.
+- Status: TODO
+- Commit message: `harden nuget configuration workflow against credential leakage`

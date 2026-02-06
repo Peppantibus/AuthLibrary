@@ -10,4 +10,5 @@ public interface IRateLimitService
     Task<bool> IsInCooldown(RateLimitRequestType type, string identifier);
     Task StartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration);
     Task<bool> TryStartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration);
+    Task ClearCooldown(RateLimitRequestType type, string identifier);
 }

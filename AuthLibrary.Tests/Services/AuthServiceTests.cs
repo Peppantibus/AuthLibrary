@@ -244,11 +244,11 @@ public class AuthServiceBasicTests
         _rateLimitServiceMock
             .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
             .ReturnsAsync(true);
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .Returns(Task.CompletedTask);
 
         var user = TestDataBuilder.User()
@@ -314,11 +314,11 @@ public class AuthServiceBasicTests
                 replayDuration = duration;
             })
             .ReturnsAsync(true);
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "test@example.com"))
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "test@example.com"))
             .Returns(Task.CompletedTask);
 
         var user = TestDataBuilder.User()
@@ -377,11 +377,11 @@ public class AuthServiceBasicTests
         _rateLimitServiceMock
             .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
             .ReturnsAsync(true);
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "newuser@example.com"))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "newuser@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "newuser@example.com"))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "newuser@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "newuser@example.com"))
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "newuser@example.com"))
             .Returns(Task.CompletedTask);
 
         _repositoryMock.Setup(x => x.GetExternalLoginAsync("google", "google-subject-2"))
@@ -526,12 +526,12 @@ public class AuthServiceBasicTests
         _rateLimitServiceMock
             .Setup(x => x.ClearCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
             .Returns(Task.CompletedTask);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "retry@example.com"))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "retry@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.SetupSequence(x => x.RegisterAttempted(RateLimitRequestType.Login, "retry@example.com"))
+        _rateLimitServiceMock.SetupSequence(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "retry@example.com"))
             .ReturnsAsync(true)
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "retry@example.com"))
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "retry@example.com"))
             .Returns(Task.CompletedTask);
 
         var user = TestDataBuilder.User()
@@ -595,11 +595,11 @@ public class AuthServiceBasicTests
         _rateLimitServiceMock
             .Setup(x => x.ClearCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
             .Returns(Task.CompletedTask);
-        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "create-retry@example.com"))
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "create-retry@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "create-retry@example.com"))
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "create-retry@example.com"))
             .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "create-retry@example.com"))
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "create-retry@example.com"))
             .Returns(Task.CompletedTask);
 
         _repositoryMock.Setup(x => x.GetExternalLoginAsync("google", "google-subject-create-retry"))

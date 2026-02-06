@@ -68,7 +68,7 @@
   - Use `RateLimitRequestType.ExternalLogin` for gate/register/reset in external login flow.
   - Keep replay cooldown logic separate from account policy counters.
   - Add regression tests proving policy separation between login methods.
-- Status: TODO
+- Status: DONE
 - Commit message: `apply dedicated external login rate-limit policy`
 
 ### SEC-006

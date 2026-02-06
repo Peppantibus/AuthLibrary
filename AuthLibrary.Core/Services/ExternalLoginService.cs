@@ -59,7 +59,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         try
         {
             var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
-                RateLimitRequestType.Login,
+                RateLimitRequestType.ExternalLogin,
                 email,
                 "utente bloccato",
                 "utente bloccato per troppi tentativi");
@@ -126,7 +126,7 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
 
             var accessToken = _runtime.TokenService.GenerateAccessToken(user);
             var refreshToken = await _runtime.TokenService.CreateRefreshToken(user);
-            await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, email);
+            await _runtime.RateLimitService.Reset(RateLimitRequestType.ExternalLogin, email);
             releaseReplayLock = false;
 
             return Result.Ok(new RefreshTokenDto

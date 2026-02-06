@@ -42,7 +42,7 @@
 - Remediation:
   - Add real eager connection/health-check during bootstrap when Redis is required.
   - Ensure startup fails deterministically if Redis is unavailable.
-- Status: TODO
+- Status: DONE
 - Commit message: `make redis startup fail-fast eager and deterministic`
 
 ### SEC-004

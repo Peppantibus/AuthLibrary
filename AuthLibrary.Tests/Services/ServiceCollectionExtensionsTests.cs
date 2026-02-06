@@ -45,6 +45,25 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddAuthLibrary_WithRequireRedisAndUnreachableRedis_ThrowsAtStartup()
+    {
+        // Arrange
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["RateLimit:RequireRedis"] = "true",
+            ["Redis:Url"] = "localhost:6399,abortConnect=true,connectTimeout=1000,syncTimeout=1000"
+        });
+        var services = new ServiceCollection();
+
+        // Act
+        var act = () => services.AddAuthLibrary<TestUser>(config);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Redis e richiesto ma non disponibile*");
+    }
+
+    [Fact]
     public void AddAuthLibrary_WithMissingPepper_Throws()
     {
         // Arrange

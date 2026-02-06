@@ -111,28 +111,46 @@ public static class ServiceCollectionExtensions
 
         if (!string.IsNullOrWhiteSpace(redisUrl))
         {
-            // Try to use Redis, but fallback to memory cache if it fails
-            services.AddSingleton(sp =>
+            if (requireRedis)
             {
-                IConnectionMultiplexer? multiplexer = null;
                 try
                 {
-                    multiplexer = ConnectionMultiplexer.Connect(redisUrl);
-                    if (requireRedis && multiplexer?.IsConnected != true)
+                    var multiplexer = ConnectionMultiplexer.Connect(redisUrl);
+                    if (multiplexer?.IsConnected != true)
                     {
                         throw new InvalidOperationException("RateLimit:RequireRedis e true ma Redis non e raggiungibile.");
                     }
-                }
-                catch (Exception)
-                {
-                    if (requireRedis)
-                    {
-                        throw new InvalidOperationException("Redis e richiesto ma non disponibile.");
-                    }
-                }
 
-                return new RedisConnectionHolder(multiplexer, requireRedis);
-            });
+                    var ping = multiplexer.GetDatabase().Ping();
+                    if (ping <= TimeSpan.Zero)
+                    {
+                        throw new InvalidOperationException("RateLimit:RequireRedis e true ma Redis non risponde al ping.");
+                    }
+
+                    services.AddSingleton(new RedisConnectionHolder(multiplexer, true));
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException("Redis e richiesto ma non disponibile.", ex);
+                }
+            }
+            else
+            {
+                // Try to use Redis, but fallback to memory cache if it fails
+                services.AddSingleton(sp =>
+                {
+                    IConnectionMultiplexer? multiplexer = null;
+                    try
+                    {
+                        multiplexer = ConnectionMultiplexer.Connect(redisUrl);
+                    }
+                    catch (Exception)
+                    {
+                    }
+
+                    return new RedisConnectionHolder(multiplexer, false);
+                });
+            }
 
             services.AddScoped<IRedisService>(sp =>
             {

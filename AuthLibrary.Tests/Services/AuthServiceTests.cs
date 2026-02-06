@@ -1060,7 +1060,9 @@ public class AuthServiceBasicTests
 
         // Assert
         result.IsSuccess.Should().BeTrue(result.Error);
-        result.Value.Should().Contain("Se l'email e registrata");
+        result.ErrorCode.Should().BeNull();
+        result.Should().BeOfType<Result<string>>();
+        ((Result<string>)result).Value.Should().Contain("Se l'email e registrata");
     }
 
     [Fact]

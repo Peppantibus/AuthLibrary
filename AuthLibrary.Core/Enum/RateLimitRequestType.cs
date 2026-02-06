@@ -6,5 +6,6 @@ public enum RateLimitRequestType
     Register,
     VerifyEmail,
     ResetPassword,
-    ExternalLogin
+    ExternalLogin,
+    RefreshToken
 }

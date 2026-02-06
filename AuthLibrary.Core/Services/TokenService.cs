@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using AuthLibrary.Configuration;
+using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
 using AuthLibrary.Models.Dto.Auth;
@@ -18,18 +19,21 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     private readonly JwtSettings _jwt;
     private readonly ILogger<TokenService<TUser>> _logger;
     private readonly IAuthRepository<TUser> _repository;
+    private readonly IRateLimitService _rateLimitService;
     private readonly RefreshTokenSettings _refreshTokenSettings;
 
     public TokenService(
         IOptions<JwtSettings> jwtSettings,
         ILogger<TokenService<TUser>> logger,
         IAuthRepository<TUser> repository,
-        IOptions<RefreshTokenSettings> refreshTokenSettings)
+        IOptions<RefreshTokenSettings> refreshTokenSettings,
+        IRateLimitService rateLimitService)
     {
         _jwt = jwtSettings.Value;
         _logger = logger;
         _repository = repository;
         _refreshTokenSettings = refreshTokenSettings.Value;
+        _rateLimitService = rateLimitService;
         
         // SECURITY: Validate JWT key configuration
         ValidateJwtConfiguration();
@@ -82,6 +86,8 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
     public async Task<RefreshTokenDto> RefreshToken(string token)
     {
+        await EnsureNotRefreshRateLimited();
+
         var tokenValidation = InputValidators.ValidateToken(token);
         if (tokenValidation.IsFailure)
         {
@@ -278,5 +284,19 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         }
 
         return operation();
+    }
+
+    private async Task EnsureNotRefreshRateLimited()
+    {
+        const string ipScopeKey = "";
+        if (await _rateLimitService.IsBlocked(RateLimitRequestType.RefreshToken, ipScopeKey))
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+
+        if (await _rateLimitService.RegisterAttempted(RateLimitRequestType.RefreshToken, ipScopeKey))
+        {
+            throw new InvalidOperationException("token non valido");
+        }
     }
 }

@@ -10,6 +10,7 @@ public class TokenServiceTests
 {
     private readonly Mock<IAuthRepository<TestUser>> _repositoryMock;
     private readonly Mock<ILogger<TokenService<TestUser>>> _loggerMock;
+    private readonly Mock<IRateLimitService> _rateLimitServiceMock;
     private readonly IOptions<JwtSettings> _jwtSettings;
     private readonly IOptions<RefreshTokenSettings> _refreshTokenSettings;
     private readonly TokenService<TestUser> _tokenService;
@@ -18,19 +19,35 @@ public class TokenServiceTests
     {
         _repositoryMock = MockFactory.CreateAuthRepository<TestUser>();
         _loggerMock = MockFactory.CreateLogger<TokenService<TestUser>>();
+        _rateLimitServiceMock = MockFactory.CreateRateLimitService();
         
         var jwtConfig = MockFactory.CreateJwtSettings();
         _jwtSettings = MockFactory.CreateOptions(jwtConfig);
         _refreshTokenSettings = MockFactory.CreateOptions(MockFactory.CreateRefreshTokenSettings());
 
-        _tokenService = new TokenService<TestUser>(_jwtSettings, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(false);
+
+        _tokenService = new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object);
     }
 
     [Fact]
     public void Constructor_WithValidConfiguration_InitializesSuccessfully()
     {
         // Arrange & Act & Assert - If constructor doesn't throw, validation passed
-        var service = new TokenService<TestUser>(_jwtSettings, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var service = new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object);
         service.Should().NotBeNull();
     }
 
@@ -48,7 +65,12 @@ public class TokenServiceTests
         var options = MockFactory.CreateOptions(invalidSettings);
 
         // Act & Assert
-        var act = () => new TokenService<TestUser>(options, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var act = () => new TokenService<TestUser>(
+            options,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*must be at least 32 bytes*");
     }
@@ -67,7 +89,12 @@ public class TokenServiceTests
         var options = MockFactory.CreateOptions(invalidSettings);
 
         // Act & Assert
-        var act = () => new TokenService<TestUser>(options, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var act = () => new TokenService<TestUser>(
+            options,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*JWT Key is not configured*");
     }
@@ -408,6 +435,38 @@ public class TokenServiceTests
         var act = async () => await _tokenService.RefreshToken("non-existent-token-0123456789abcdef");
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*non valido*");
+    }
+
+    [Fact]
+    public async Task RefreshToken_WhenIpIsRateLimited_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken("plain-refresh-token-0123456789abcdef");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
+        _repositoryMock.Verify(x => x.GetRefreshTokenAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshToken_WhenRefreshAttemptLimitReached_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken("plain-refresh-token-0123456789abcdef");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
+        _repositoryMock.Verify(x => x.GetRefreshTokenAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

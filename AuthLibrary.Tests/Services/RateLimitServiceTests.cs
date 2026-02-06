@@ -323,6 +323,7 @@ public class RateLimitServiceTests
     [InlineData(RateLimitRequestType.Register, 3, 10)]
     [InlineData(RateLimitRequestType.VerifyEmail, 5, 15)]
     [InlineData(RateLimitRequestType.ResetPassword, 3, 10)]
+    [InlineData(RateLimitRequestType.RefreshToken, 30, 60)]
     public async Task RegisterAttempted_DifferentRequestTypes_UsesCorrectLimits(
         RateLimitRequestType type, 
         int maxUserAttempts, 
@@ -375,6 +376,7 @@ public class RateLimitServiceTests
         config.Should().ContainKey(RateLimitRequestType.VerifyEmail);
         config.Should().ContainKey(RateLimitRequestType.ResetPassword);
         config.Should().ContainKey(RateLimitRequestType.ExternalLogin);
+        config.Should().ContainKey(RateLimitRequestType.RefreshToken);
     }
 
     [Fact]

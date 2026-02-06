@@ -76,26 +76,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             && CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
         if (!isValid)
         {
-            if (!userExists)
-            {
-                _runtime.Logger.LogWarning("Login fallito: utente non trovato");
-                _runtime.Logger.LogDebug("Login fallito: utente non trovato");
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
-            }
-
-            if (user is null)
-            {
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
-            }
-
-            if (!user.EmailVerified)
-            {
-                _runtime.Logger.LogWarning("Login fallito: email non verificata");
-                _runtime.Logger.LogDebug("Login fallito: email non verificata");
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
-            }
-
-            // Account-specific counter increments only after confirming account existence.
+            // Keep account-scoped throttling uniform to avoid username enumeration side channels.
             var accountLimit = await _runtime.RateLimitGuard.RegisterAttempt(
                 RateLimitRequestType.Login,
                 rateLimitKey,
@@ -104,7 +85,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             {
                 _runtime.Logger.LogWarning("Login bloccato (rate limit account)");
                 _runtime.Logger.LogDebug("Login bloccato (account rate limit)");
-                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, accountLimit.Error);
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
             }
 
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");

@@ -282,10 +282,40 @@ public class AuthController : ControllerBase
 public sealed record GoogleLoginRequest(string IdToken, string? Nonce);
 ```
 
+Email flows (enumeration-safe)
+------------------------------
+```csharp
+[HttpPost("resend-verification")]
+public async Task<IActionResult> ResendVerification([FromBody] string email)
+{
+    var result = await _auth.ResendVerificationEmail(email);
+    return result.IsSuccess
+        ? Ok("Se l'email e registrata e non ancora verificata, ti abbiamo inviato un link di verifica.")
+        : StatusCode(429, new { result.Error, result.ErrorCode });
+}
+
+[HttpPost("recovery")]
+public async Task<IActionResult> Recovery([FromBody] string email)
+{
+    var result = await _auth.RecoveryPassword(email);
+    return result.IsSuccess
+        ? Ok(result.Value)
+        : StatusCode(429, new { result.Error, result.ErrorCode });
+}
+```
+
 Result contract
 ---------------
 - All API methods return `Result` / `Result<T>`.
 - On failures, `Error` contains the message and `ErrorCode` contains a stable typed code.
+- `Result<T>` exposes `Value`; `Result` (non generic) does not.
+- For methods declared as `Task<Result>`, treat success as boolean outcome and do not depend on runtime downcasts to `Result<T>`.
+
+Behavior notes
+--------------
+- `ResendVerificationEmail` is enumeration-safe: for unknown email, already verified email, or internal mail send failure it returns success with a generic outcome.
+- `RecoveryPassword` is enumeration-safe and returns a generic success message (`Result<string>`) also when user is unknown or email delivery fails.
+- On rate-limit failures, APIs return failure with `ErrorCode = RateLimited`.
 
 Configuration reference
 -----------------------

@@ -253,6 +253,16 @@ public class RateLimitService : IRateLimitService
                     AttemptWindow = TimeSpan.FromMinutes(30),
                     LockDuration = TimeSpan.FromMinutes(15)
                 }
+            },
+            {
+                RateLimitRequestType.ExternalLogin,
+                new RateLimitConfiguration
+                {
+                    MaxUserAttempts = 5,
+                    MaxIpAttempts = 20,
+                    AttemptWindow = TimeSpan.FromMinutes(15),
+                    LockDuration = TimeSpan.FromMinutes(5)
+                }
             }
         };
     }

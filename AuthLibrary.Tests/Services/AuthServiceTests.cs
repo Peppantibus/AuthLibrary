@@ -232,14 +232,19 @@ public class AuthServiceBasicTests
             Subject = "google-subject-1",
             Email = "test@example.com",
             EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
             GivenName = "Test",
             FamilyName = "User"
         };
 
         _externalTokenValidatorMock
-            .Setup(x => x.ValidateGoogleIdToken(idToken))
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
             .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
@@ -290,14 +295,19 @@ public class AuthServiceBasicTests
             Subject = "google-subject-2",
             Email = "newuser@example.com",
             EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
             GivenName = "New",
             FamilyName = "User"
         };
 
         _externalTokenValidatorMock
-            .Setup(x => x.ValidateGoogleIdToken(idToken))
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "newuser@example.com"))
             .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "newuser@example.com"))
@@ -358,11 +368,12 @@ public class AuthServiceBasicTests
         {
             Subject = "google-subject-3",
             Email = "test@example.com",
-            EmailVerified = false
+            EmailVerified = false,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10)
         };
 
         _externalTokenValidatorMock
-            .Setup(x => x.ValidateGoogleIdToken(idToken))
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
         // Act
@@ -379,7 +390,7 @@ public class AuthServiceBasicTests
         // Arrange
         var idToken = "invalid-token";
         _externalTokenValidatorMock
-            .Setup(x => x.ValidateGoogleIdToken(idToken))
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ThrowsAsync(new InvalidOperationException("token non valido"));
 
         // Act
@@ -388,6 +399,34 @@ public class AuthServiceBasicTests
         // Assert
         result.IsSuccess.Should().BeFalse();
         result.Error.Should().Contain("token non valido");
+    }
+
+    [Fact]
+    public async Task ExternalLoginWithGoogle_WithReplayToken_ReturnsFailure()
+    {
+        // Arrange
+        var idToken = "replayed-token";
+        var externalUser = new ExternalUserInfo
+        {
+            Subject = "google-subject-4",
+            Email = "test@example.com",
+            EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10)
+        };
+
+        _externalTokenValidatorMock
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
+            .ReturnsAsync(externalUser);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _authService.ExternalLoginWithGoogle(idToken);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.Error.Should().Contain("token non valido");
+        _tokenServiceMock.Verify(x => x.GenerateAccessToken(It.IsAny<TestUser>()), Times.Never);
     }
 
     #endregion

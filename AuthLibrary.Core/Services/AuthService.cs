@@ -61,9 +61,9 @@ public class AuthService<TUser> : IAuthService<TUser> where TUser : class, IAuth
         return _loginService.Login(username, password);
     }
 
-    public Task<Result<RefreshTokenDto>> ExternalLoginWithGoogle(string idToken)
+    public Task<Result<RefreshTokenDto>> ExternalLoginWithGoogle(string idToken, string? expectedNonce = null)
     {
-        return _externalLoginService.ExternalLoginWithGoogle(idToken);
+        return _externalLoginService.ExternalLoginWithGoogle(idToken, expectedNonce);
     }
 
     public Task<Result> AddUser(TUser user)

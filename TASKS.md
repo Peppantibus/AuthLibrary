@@ -76,7 +76,7 @@
 - Remediation:
   - Add nonce validation contract for backend-bound flows.
   - Add replay cache strategy based on token identifiers/claims.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-006: add nonce and replay protections for google login`
 
 ### SEC-007

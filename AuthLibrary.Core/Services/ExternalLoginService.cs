@@ -16,12 +16,12 @@ internal sealed class ExternalLoginService<TUser> where TUser : class, IAuthUser
         _runtime = runtime;
     }
 
-    public async Task<Result<RefreshTokenDto>> ExternalLoginWithGoogle(string idToken)
+    public async Task<Result<RefreshTokenDto>> ExternalLoginWithGoogle(string idToken, string? expectedNonce = null)
     {
         ExternalUserInfo externalUser;
         try
         {
-            externalUser = await _runtime.ExternalTokenValidator.ValidateGoogleIdToken(idToken);
+            externalUser = await _runtime.ExternalTokenValidator.ValidateGoogleIdToken(idToken, expectedNonce);
         }
         catch (InvalidOperationException ex)
         {
@@ -41,6 +41,13 @@ internal sealed class ExternalLoginService<TUser> where TUser : class, IAuthUser
         if (string.IsNullOrWhiteSpace(email))
         {
             return Result.Fail<RefreshTokenDto>("email non valida");
+        }
+
+        var replayKey = AuthRuntime<TUser>.HashToken(idToken);
+        if (await _runtime.RateLimitService.IsInCooldown(RateLimitRequestType.ExternalLogin, replayKey))
+        {
+            _runtime.Logger.LogWarning("Google id_token replay rilevato");
+            return Result.Fail<RefreshTokenDto>("token non valido");
         }
 
         var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
@@ -113,6 +120,10 @@ internal sealed class ExternalLoginService<TUser> where TUser : class, IAuthUser
         var accessToken = _runtime.TokenService.GenerateAccessToken(user);
         var refreshToken = await _runtime.TokenService.CreateRefreshToken(user);
         await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, email);
+        await _runtime.RateLimitService.StartCooldown(
+            RateLimitRequestType.ExternalLogin,
+            replayKey,
+            BuildReplayWindow(externalUser.ExpiresAtUtc));
 
         return Result.Ok(new RefreshTokenDto
         {
@@ -127,6 +138,18 @@ internal sealed class ExternalLoginService<TUser> where TUser : class, IAuthUser
                 LastName = user.LastName
             }
         });
+    }
+
+    private static TimeSpan BuildReplayWindow(DateTime expiresAtUtc)
+    {
+        var ttl = expiresAtUtc - DateTime.UtcNow;
+        if (ttl <= TimeSpan.Zero)
+        {
+            return TimeSpan.FromMinutes(1);
+        }
+
+        // Keep a minimum floor to avoid edge cases with clock skew.
+        return ttl < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : ttl;
     }
 
     private TUser CreateUserFromExternal(ExternalUserInfo externalUser, string normalizedEmail)

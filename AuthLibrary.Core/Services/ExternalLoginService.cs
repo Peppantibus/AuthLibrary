@@ -50,24 +50,15 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             return Result.Fail<RefreshTokenDto>("token non valido");
         }
 
-        var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
+        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Login,
             email,
+            "utente bloccato",
             "utente bloccato per troppi tentativi");
         if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Login Google bloccato (rate limit)");
             return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
-        }
-
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
-            RateLimitRequestType.Login,
-            email,
-            "utente bloccato");
-        if (blockedResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Login Google bloccato");
-            return Result.Fail<RefreshTokenDto>(blockedResult.Error);
         }
 
         const string provider = "google";

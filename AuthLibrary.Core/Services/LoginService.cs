@@ -31,26 +31,16 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         // Pre-auth throttling is IP scoped to reduce account lockout abuse.
         var ipScopeKey = string.Empty;
         var rateLimitKey = AuthRuntime<TUser>.NormalizeIdentifier(username);
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
+        var preAuthRateLimit = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Login,
             ipScopeKey,
-            "utente bloccato");
-        if (blockedResult.IsFailure)
+            "utente bloccato",
+            "utente bloccato per troppi tentativi");
+        if (preAuthRateLimit.IsFailure)
         {
             _runtime.Logger.LogWarning("Login bloccato");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip lock pre-auth)", username);
-            return Result.Fail<RefreshTokenDto>(blockedResult.Error);
-        }
-
-        var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
-            RateLimitRequestType.Login,
-            ipScopeKey,
-            "utente bloccato per troppi tentativi");
-        if (rateLimitResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Login bloccato (rate limit)");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip rate limit)", username);
-            return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
+            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip policy pre-auth)", username);
+            return Result.Fail<RefreshTokenDto>(preAuthRateLimit.Error);
         }
 
         var user = await _runtime.Repository.GetUserByUsernameAsync(username);

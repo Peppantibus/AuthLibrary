@@ -26,26 +26,16 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
+        var gateResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldown(
             RateLimitRequestType.ResetPassword,
             normalizedEmail,
+            "Se l'email e registrata, ti abbiamo inviato un link per il reset.",
             "Se l'email e registrata, ti abbiamo inviato un link per il reset.");
-        if (blockedResult.IsFailure)
+        if (gateResult.IsFailure)
         {
-            _runtime.Logger.LogWarning("RecoveryPassword bloccato (rate limit)");
-            _runtime.Logger.LogDebug("RecoveryPassword bloccato per email {email} (rate limit)", email);
-            return Result.Ok(blockedResult.Error);
-        }
-
-        var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(
-            RateLimitRequestType.ResetPassword,
-            normalizedEmail,
-            "Se l'email e registrata, ti abbiamo inviato un link per il reset.");
-        if (cooldownResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("RecoveryPassword in cooldown");
-            _runtime.Logger.LogDebug("RecoveryPassword in cooldown per email {email}", email);
-            return Result.Ok(cooldownResult.Error);
+            _runtime.Logger.LogWarning("RecoveryPassword bloccato o in cooldown");
+            _runtime.Logger.LogDebug("RecoveryPassword bloccato/cooldown per email {email}", email);
+            return Result.Ok(gateResult.Error);
         }
 
         var existingEntry = await _runtime.Repository.GetUserByEmailAsync(normalizedEmail);

@@ -23,26 +23,16 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
+        var gateResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldown(
             RateLimitRequestType.VerifyEmail,
             normalizedEmail,
-            "Troppi tentativi. Riprova piu tardi.");
-        if (blockedResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Resend bloccato (rate limit)");
-            _runtime.Logger.LogDebug("Resend bloccato per email {email} (rate limit)", email);
-            return Result.Fail(blockedResult.Error);
-        }
-
-        var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(
-            RateLimitRequestType.VerifyEmail,
-            normalizedEmail,
+            "Troppi tentativi. Riprova piu tardi.",
             "Attendi prima di richiedere un nuovo invio.");
-        if (cooldownResult.IsFailure)
+        if (gateResult.IsFailure)
         {
-            _runtime.Logger.LogWarning("Resend in cooldown");
-            _runtime.Logger.LogDebug("Resend in cooldown per email {email}", email);
-            return Result.Fail(cooldownResult.Error);
+            _runtime.Logger.LogWarning("Resend bloccato o in cooldown");
+            _runtime.Logger.LogDebug("Resend bloccato/cooldown per email {email}", email);
+            return Result.Fail(gateResult.Error);
         }
 
         var user = await _runtime.Repository.GetUserByEmailAsync(normalizedEmail);
@@ -142,28 +132,17 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
     {
         _runtime.Logger.LogDebug("Preparazione invio email {type} a {email}", type, email);
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(type, email, "utente bloccato");
-        if (blockedResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Block RATE LIMIT {type}", type);
-            _runtime.Logger.LogDebug("Block RATE LIMIT {type} per email {email}", type, email);
-            return Result.Fail(blockedResult.Error);
-        }
-
-        var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(type, email, "utente in cooldown");
-        if (cooldownResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Cooldown attivo (tipo {type})", type);
-            _runtime.Logger.LogDebug("Cooldown attivo per email {email} (tipo {type})", email, type);
-            return Result.Fail(cooldownResult.Error);
-        }
-
-        var attemptResult = await _runtime.RateLimitGuard.RegisterAttempt(type, email, "troppi tentativi, utente bloccato temporaneamente");
-        if (attemptResult.IsFailure)
+        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldownAndRegisterAttempt(
+            type,
+            email,
+            "utente bloccato",
+            "utente in cooldown",
+            "troppi tentativi, utente bloccato temporaneamente");
+        if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Tentativi eccessivi per {type}. Utente bloccato.", type);
             _runtime.Logger.LogDebug("Tentativi eccessivi per {type} email {email}. Utente bloccato.", type, email);
-            return Result.Fail(attemptResult.Error);
+            return Result.Fail(rateLimitResult.Error);
         }
 
         var url = $"{_runtime.AuthSettings.FrontendUrl}{urlPath}{Uri.EscapeDataString(plainToken)}";

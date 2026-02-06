@@ -120,7 +120,7 @@
 - Action:
   - Centralize policy orchestration in dedicated reusable component.
 - Benefit: Lower duplication and more consistent behavior.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-003: centralize rate-limit and cooldown orchestration`
 
 ### REF-004

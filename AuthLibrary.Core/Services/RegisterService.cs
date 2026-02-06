@@ -25,26 +25,16 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
             user.Email = normalizedEmail;
         }
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
+        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Register,
             normalizedEmail,
-            "utente bloccato");
-        if (blockedResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Registrazione bloccata");
-            _runtime.Logger.LogDebug("Registrazione bloccata per email {email}", user.Email);
-            return Result.Fail(blockedResult.Error);
-        }
-
-        var attemptResult = await _runtime.RateLimitGuard.RegisterAttempt(
-            RateLimitRequestType.Register,
-            normalizedEmail,
+            "utente bloccato",
             "utente bloccato per troppi tentativi");
-        if (attemptResult.IsFailure)
+        if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Registrazione bloccata (rate limit)");
             _runtime.Logger.LogDebug("Registrazione bloccata per email {email} (rate limit)", user.Email);
-            return Result.Fail(attemptResult.Error);
+            return Result.Fail(rateLimitResult.Error);
         }
 
         var exists = await _runtime.Repository.UserExistsAsync(user.Username, normalizedEmail);

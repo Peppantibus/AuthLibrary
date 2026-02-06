@@ -83,6 +83,11 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
                 return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
             }
 
+            if (user is null)
+            {
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+            }
+
             if (!user.EmailVerified)
             {
                 _runtime.Logger.LogWarning("Login fallito: email non verificata");
@@ -104,6 +109,11 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
 
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");
             _runtime.Logger.LogDebug("Login fallito: password errata per utente {username}", username);
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+        }
+
+        if (user is null)
+        {
             return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 

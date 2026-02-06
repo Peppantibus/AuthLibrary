@@ -891,7 +891,7 @@ public class AuthServiceBasicTests
     public async Task ResetPassword_WithValidToken_UpdatesPasswordAndReturnsTrue()
     {
         // Arrange
-        var token = "valid-token";
+        var token = "valid-token-0123456789-valid-token-0123";
         var tokenHash = HashToken(token);
 
         var user = TestDataBuilder.User()

@@ -12,10 +12,11 @@ Features
 - Email verification and password reset flows
 - Redis-backed rate limiting with in-memory fallback
 - Configurable JWT settings
-- Optional Google ID token validation
+- Optional Google ID token validation with nonce and replay protection
 - Configurable rate limit rules and refresh token lifetime
+- Startup configuration validation (fail-fast)
 - Safe logging (PII only at Debug level)
-- Lightweight input validation for login/reset
+- Input validation with length/format constraints for auth inputs
 
 Quick start
 -----------
@@ -78,10 +79,16 @@ Quick start
         "MaxIpAttempts": 10,
         "AttemptWindow": "00:30:00",
         "LockDuration": "00:15:00"
+      },
+      "ExternalLogin": {
+        "MaxUserAttempts": 5,
+        "MaxIpAttempts": 20,
+        "AttemptWindow": "00:15:00",
+        "LockDuration": "00:05:00"
       }
     },
     "TrustedProxyIps": [ "10.0.0.1", "10.0.0.2" ],
-    "RequireRedis": false
+    "RequireRedis": true
   },
   "GoogleAuth": {
     "ClientId": "YOUR_GOOGLE_CLIENT_ID",
@@ -98,18 +105,9 @@ Quick start
 ```csharp
 services.AddHttpContextAccessor(); // required for rate limiting
 services.AddAuthLibrary<MyUser>(configuration);
-
-// If you need trusted proxies for rate limiting:
-services.AddScoped<IRateLimitService>(sp =>
-{
-    var redis = sp.GetRequiredService<IRedisService>();
-    var http = sp.GetRequiredService<IHttpContextAccessor>();
-    return new RateLimitService(
-        redis,
-        http,
-        trustedProxyIps: new[] { "10.0.0.1", "10.0.0.2" });
-});
 ```
+
+Configure trusted proxies via `RateLimit:TrustedProxyIps` in configuration.
 
 3) Implement IAuthRepository<TUser> (see below).
 
@@ -125,7 +123,7 @@ interface includes methods to:
 - Store/retrieve users
 - Store/retrieve/remove email verification tokens
 - Store/retrieve/remove password reset tokens
-- Store/rotate refresh tokens
+- Store/rotate refresh tokens (atomic rotation contract)
 - Store/retrieve external logins (e.g., Google)
 
 Example skeleton (EF Core style)
@@ -192,6 +190,35 @@ public sealed class AuthRepository : IAuthRepository<MyUser>
     public Task UpdateRefreshTokenAsync(RefreshToken token)
     { _db.RefreshTokens.Update(token); return Task.CompletedTask; }
 
+    public async Task<bool> TryRotateRefreshTokenAsync(
+        string oldTokenHash,
+        string newTokenHash,
+        DateTime revokedAt,
+        DateTime newTokenCreatedAt,
+        DateTime newTokenExpiresAt)
+    {
+        // Example: conditional update should affect exactly one active token row.
+        var existing = await _db.RefreshTokens
+            .FirstOrDefaultAsync(t => t.TokenHash == oldTokenHash &&
+                                      t.RevokedAt == null &&
+                                      t.ReplacedByToken == null);
+        if (existing == null) return false;
+
+        existing.RevokedAt = revokedAt;
+        existing.ReplacedByToken = newTokenHash;
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = existing.UserId,
+            TokenHash = newTokenHash,
+            CreatedAt = newTokenCreatedAt,
+            ExpiresAt = newTokenExpiresAt
+        });
+
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
     public Task RemoveRefreshTokensByUserIdAsync(string userId)
     {
         _db.RefreshTokens.RemoveRange(_db.RefreshTokens.Where(t => t.UserId == userId));
@@ -207,6 +234,10 @@ public sealed class AuthRepository : IAuthRepository<MyUser>
     public Task SaveChangesAsync() => _db.SaveChangesAsync();
 }
 ```
+
+If your repository supports transactions, also implement
+`ITransactionalAuthRepository<TUser>` to let the library wrap critical
+multi-step flows in a single transaction boundary.
 
 Usage (Controllers or Minimal API)
 ----------------------------------
@@ -239,19 +270,28 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("google")]
-    public async Task<IActionResult> GoogleLogin([FromBody] string idToken)
+    public async Task<IActionResult> GoogleLogin([FromBody] GoogleLoginRequest body)
     {
-        var result = await _auth.ExternalLoginWithGoogle(idToken);
-        return result.IsSuccess ? Ok(result.Value) : Unauthorized(result.Error);
+        var result = await _auth.ExternalLoginWithGoogle(body.IdToken, body.Nonce);
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : Unauthorized(new { result.Error, result.ErrorCode });
     }
 }
+
+public sealed record GoogleLoginRequest(string IdToken, string? Nonce);
 ```
+
+Result contract
+---------------
+- All API methods return `Result` / `Result<T>`.
+- On failures, `Error` contains the message and `ErrorCode` contains a stable typed code.
 
 Configuration reference
 -----------------------
 JwtSettings
 - Key: HMAC key, minimum 32 bytes (required).
-- Issuer, Audience: used in JWT (recommended).
+- Issuer, Audience: required.
 - AccessTokenLifetimeMinutes: must be > 0.
 
 SecuritySettings
@@ -259,6 +299,7 @@ SecuritySettings
 
 MailService
 - SMTP settings for MailKit.
+- AppMail, Host, Port and SenderName are required.
 - TimeoutSeconds: operation timeout (default 30).
 - RetryCount: retry attempts on transient errors (default 1).
 - RetryDelayMilliseconds: delay between retries (default 500).
@@ -273,40 +314,45 @@ RefreshTokenSettings
 - RefreshTokenLifetimeDays: default 30.
 
 RateLimit
-- Rules: dictionary keyed by enum name (Login, Register, VerifyEmail, ResetPassword).
+- Rules: dictionary keyed by enum name (Login, Register, VerifyEmail, ResetPassword, ExternalLogin).
   If omitted, defaults are used.
 - TrustedProxyIps: list of proxy IPs allowed to set X-Forwarded-For. If empty, the library uses the remote IP (safe, but may cause shared rate limiting behind a proxy).
-- RequireRedis: if true and Redis is configured but unavailable, the library will throw on startup instead of falling back to in-memory.
+- RequireRedis: default true. When true, `Redis:Url` is required and Redis failures are not silently accepted.
 
 GoogleAuth
-- ClientId: required to validate Google ID tokens.
+- ClientId: required only if you enable Google login endpoints.
 - AllowedHostedDomain: optional restriction by Google Workspace domain (claim `hd`).
 Google sign-in requires registering `IExternalUserFactory<TUser>` in your app to create/link users.
 
+Startup validation
+- `AddAuthLibrary` validates critical options at startup and throws `InvalidOperationException` on invalid configuration.
+
 Validation rules
 ----------------
-- Login: username and password required.
-- ResetPassword: token, password, confirm password required.
-- Password strength: handled by IPasswordValidator (default: length + upper/lower/digit/special).
+- Login: username/password required, username format validated, max lengths enforced.
+- ResetPassword: token/password/confirm required, token format/length validated, max lengths enforced.
+- Password strength: handled by `IPasswordValidator` (default: min 8, max 256, upper/lower/digit/special).
 
 Logging
 -------
 - Email/username is logged only at Debug level.
 - Info/Warning messages are safe for production logs.
-- If Redis is unavailable, a warning is logged and in-memory fallback is used (unless `RateLimit:RequireRedis` is true).
+- If Redis is unavailable and `RateLimit:RequireRedis` is false, a warning is logged and in-memory fallback is used.
 
 Security notes
 --------------
 - JWT key must be at least 32 bytes.
 - Refresh tokens are stored as SHA256 hashes; only the plain token is returned.
 - Refresh token reuse invalidates all sessions for that user.
-- Rate limiting uses Redis when available; in-memory fallback is best-effort.
+- Rate limiting uses Redis when available; in-memory fallback is used only when `RateLimit:RequireRedis` is false.
 - X-Forwarded-For is honored only for trusted proxies (configure explicitly).
 - Pepper is mandatory; the library throws on startup if missing.
-- Google login expects a valid Google `id_token` generated by your app’s OAuth flow.
+- Google login expects a valid Google `id_token` from your app's OAuth flow.
+- Google login supports optional nonce binding and replay cooldown checks.
 
 Testing
 -------
 ```bash
 dotnet test
 ```
+

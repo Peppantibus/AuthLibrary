@@ -170,5 +170,5 @@
 - Action:
   - Align README and examples with actual public API and enabled features.
 - Benefit: Better integration reliability and lower onboarding friction.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-008: align documentation with current auth api`

@@ -150,7 +150,7 @@
 - Action:
   - Add centralized options validation and startup fail-fast checks.
 - Benefit: Earlier failure detection and clearer diagnostics.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-006: centralize options validation with startup checks`
 
 ### REF-007

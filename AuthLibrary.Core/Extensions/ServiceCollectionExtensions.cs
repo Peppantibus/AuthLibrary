@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StackExchange.Redis;
 
 namespace AuthLibrary.Extensions;
@@ -25,9 +25,11 @@ public static class ServiceCollectionExtensions
         }
     }
 
-    public static IServiceCollection AddAuthLibrary<TUser>(this IServiceCollection services, IConfiguration config) 
+    public static IServiceCollection AddAuthLibrary<TUser>(this IServiceCollection services, IConfiguration config)
         where TUser : class, IAuthUser
     {
+        var startupSettings = AuthLibraryOptionsValidator.Validate(config);
+
         services.Configure<JwtSettings>(config.GetSection("JwtSettings"));
         services.Configure<SecuritySettings>(config.GetSection("SecuritySettings"));
         services.Configure<MailSettings>(config.GetSection("MailService"));
@@ -68,11 +70,6 @@ public static class ServiceCollectionExtensions
             var externalTokenValidator = sp.GetRequiredService<IExternalTokenValidator>();
             var externalUserFactory = sp.GetService<IExternalUserFactory<TUser>>();
 
-            if (string.IsNullOrWhiteSpace(securitySettings.Pepper))
-            {
-                throw new InvalidOperationException("SecuritySettings:Pepper non configurato.");
-            }
-
             return new AuthRuntime<TUser>(
                 repository,
                 securitySettings.Pepper,
@@ -100,19 +97,19 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IPasswordFlowService<TUser>>(sp => sp.GetRequiredService<PasswordService<TUser>>());
         services.AddScoped<IExternalLoginService<TUser>>(sp => sp.GetRequiredService<ExternalLoginService<TUser>>());
         services.AddScoped<IAuthService<TUser>, AuthService<TUser>>();
-        
+
         // Always add MemoryCache (used as fallback if Redis fails)
         services.AddMemoryCache();
-        
+
         // Redis with automatic in-memory fallback
-        var redisUrl = config["Redis:Url"];
-        var requireRedis = config.GetValue<bool>("RateLimit:RequireRedis");
+        var redisUrl = startupSettings.RedisUrl;
+        var requireRedis = startupSettings.RequireRedis;
         if (requireRedis && string.IsNullOrWhiteSpace(redisUrl))
         {
-            throw new InvalidOperationException("RateLimit:RequireRedis è true ma Redis:Url non è configurato.");
+            throw new InvalidOperationException("RateLimit:RequireRedis e true ma Redis:Url non e configurato.");
         }
 
-        if (!string.IsNullOrEmpty(redisUrl))
+        if (!string.IsNullOrWhiteSpace(redisUrl))
         {
             // Try to use Redis, but fallback to memory cache if it fails
             services.AddSingleton(sp =>
@@ -123,19 +120,20 @@ public static class ServiceCollectionExtensions
                     multiplexer = ConnectionMultiplexer.Connect(redisUrl);
                     if (requireRedis && multiplexer?.IsConnected != true)
                     {
-                        throw new InvalidOperationException("RateLimit:RequireRedis è true ma Redis non è raggiungibile.");
+                        throw new InvalidOperationException("RateLimit:RequireRedis e true ma Redis non e raggiungibile.");
                     }
                 }
                 catch (Exception)
                 {
                     if (requireRedis)
                     {
-                        throw new InvalidOperationException("Redis è richiesto ma non disponibile.");
+                        throw new InvalidOperationException("Redis e richiesto ma non disponibile.");
                     }
                 }
+
                 return new RedisConnectionHolder(multiplexer, requireRedis);
             });
-            
+
             services.AddScoped<IRedisService>(sp =>
             {
                 var holder = sp.GetRequiredService<RedisConnectionHolder>();
@@ -146,7 +144,7 @@ public static class ServiceCollectionExtensions
 
                 if (holder.RequireRedis)
                 {
-                    throw new InvalidOperationException("Redis è richiesto ma non disponibile.");
+                    throw new InvalidOperationException("Redis e richiesto ma non disponibile.");
                 }
 
                 // Fallback to in-memory cache

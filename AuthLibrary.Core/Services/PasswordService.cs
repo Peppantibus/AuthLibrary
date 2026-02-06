@@ -8,7 +8,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class PasswordService<TUser> where TUser : class, IAuthUser
+internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where TUser : class, IAuthUser
 {
     private readonly AuthRuntime<TUser> _runtime;
     private readonly EmailVerificationService<TUser> _emailVerificationService;

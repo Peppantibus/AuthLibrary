@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class EmailVerificationService<TUser> where TUser : class, IAuthUser
+internal sealed class EmailVerificationService<TUser> : IEmailVerificationService<TUser> where TUser : class, IAuthUser
 {
     private readonly AuthRuntime<TUser> _runtime;
 

@@ -37,7 +37,6 @@ public static class ServiceCollectionExtensions
         services.Configure<RefreshTokenSettings>(config.GetSection("RefreshTokenSettings"));
         services.Configure<GoogleAuthSettings>(config.GetSection("GoogleAuth"));
 
-        services.AddScoped<IAuthService<TUser>, AuthService<TUser>>();
         services.AddScoped<ITokenService<TUser>, TokenService<TUser>>();
         services.AddScoped<IMailService, MailService>();
         services.AddScoped<IMailTemplateService, MailTemplateService>();
@@ -54,6 +53,53 @@ public static class ServiceCollectionExtensions
                 rateLimitSettings.TrustedProxyIps);
         });
         services.AddScoped<IPasswordValidator, DefaultPasswordValidator>();
+        services.AddScoped<AuthRuntime<TUser>>(sp =>
+        {
+            var repository = sp.GetRequiredService<IAuthRepository<TUser>>();
+            var securitySettings = sp.GetRequiredService<IOptions<SecuritySettings>>().Value;
+            var mailService = sp.GetRequiredService<IMailService>();
+            var tokenService = sp.GetRequiredService<ITokenService<TUser>>();
+            var rateLimitService = sp.GetRequiredService<IRateLimitService>();
+            var templateService = sp.GetRequiredService<IMailTemplateService>();
+            var authSettings = sp.GetRequiredService<IOptions<AuthSettings>>().Value;
+            var mailSettings = sp.GetRequiredService<IOptions<MailSettings>>().Value;
+            var logger = sp.GetRequiredService<ILogger<AuthService<TUser>>>();
+            var passwordValidator = sp.GetRequiredService<IPasswordValidator>();
+            var externalTokenValidator = sp.GetRequiredService<IExternalTokenValidator>();
+            var externalUserFactory = sp.GetService<IExternalUserFactory<TUser>>();
+
+            if (string.IsNullOrWhiteSpace(securitySettings.Pepper))
+            {
+                throw new InvalidOperationException("SecuritySettings:Pepper non configurato.");
+            }
+
+            return new AuthRuntime<TUser>(
+                repository,
+                securitySettings.Pepper,
+                mailService,
+                tokenService,
+                rateLimitService,
+                templateService,
+                authSettings,
+                mailSettings,
+                logger,
+                passwordValidator,
+                externalTokenValidator,
+                externalUserFactory);
+        });
+
+        services.AddScoped<LoginService<TUser>>();
+        services.AddScoped<RegisterService<TUser>>();
+        services.AddScoped<EmailVerificationService<TUser>>();
+        services.AddScoped<PasswordService<TUser>>();
+        services.AddScoped<ExternalLoginService<TUser>>();
+
+        services.AddScoped<ILoginService<TUser>>(sp => sp.GetRequiredService<LoginService<TUser>>());
+        services.AddScoped<IRegisterService<TUser>>(sp => sp.GetRequiredService<RegisterService<TUser>>());
+        services.AddScoped<IEmailVerificationService<TUser>>(sp => sp.GetRequiredService<EmailVerificationService<TUser>>());
+        services.AddScoped<IPasswordFlowService<TUser>>(sp => sp.GetRequiredService<PasswordService<TUser>>());
+        services.AddScoped<IExternalLoginService<TUser>>(sp => sp.GetRequiredService<ExternalLoginService<TUser>>());
+        services.AddScoped<IAuthService<TUser>, AuthService<TUser>>();
         
         // Always add MemoryCache (used as fallback if Redis fails)
         services.AddMemoryCache();

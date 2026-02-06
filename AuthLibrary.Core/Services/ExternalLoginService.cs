@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class ExternalLoginService<TUser> where TUser : class, IAuthUser
+internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser> where TUser : class, IAuthUser
 {
     private readonly AuthRuntime<TUser> _runtime;
 

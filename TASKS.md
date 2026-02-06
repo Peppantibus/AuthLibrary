@@ -100,7 +100,7 @@
   - Extract domain services (login, registration, password, email, external auth).
   - Inject abstractions through DI.
 - Benefit: Better testability, lower coupling, clearer boundaries.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-001: split auth service responsibilities into domain services`
 
 ### REF-002

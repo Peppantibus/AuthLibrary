@@ -44,36 +44,49 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         }
 
         var user = await _runtime.Repository.GetUserByUsernameAsync(username);
-        if (user == null)
-        {
-            _runtime.Logger.LogWarning("Login fallito: utente non trovato");
-            _runtime.Logger.LogDebug("Login fallito: utente {username} non trovato", username);
-            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
-        }
-
-        if (!user.EmailVerified)
-        {
-            _runtime.Logger.LogWarning("Login fallito: email non verificata");
-            _runtime.Logger.LogDebug("Login fallito: email non verificata per utente {username}", username);
-            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
-        }
-
         byte[] storedHash;
         byte[] saltBytes;
-        try
+        var userExists = user != null;
+
+        if (!userExists)
         {
-            storedHash = Convert.FromBase64String(user.Password);
-            saltBytes = Convert.FromBase64String(user.Salt);
+            // Keep a comparable crypto path for unknown users to reduce timing side-channels.
+            saltBytes = RandomNumberGenerator.GetBytes(16);
+            storedHash = _runtime.HashPassword("invalid-password", saltBytes);
         }
-        catch
+        else
         {
-            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserDataInvalid);
+            try
+            {
+                storedHash = Convert.FromBase64String(user!.Password);
+                saltBytes = Convert.FromBase64String(user.Salt);
+            }
+            catch
+            {
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserDataInvalid);
+            }
         }
 
         var testHashed = _runtime.HashPassword(password, saltBytes);
-        var isValid = CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
+        var isValid = userExists
+            && user!.EmailVerified
+            && CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
         if (!isValid)
         {
+            if (!userExists)
+            {
+                _runtime.Logger.LogWarning("Login fallito: utente non trovato");
+                _runtime.Logger.LogDebug("Login fallito: utente {username} non trovato", username);
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+            }
+
+            if (!user.EmailVerified)
+            {
+                _runtime.Logger.LogWarning("Login fallito: email non verificata");
+                _runtime.Logger.LogDebug("Login fallito: email non verificata per utente {username}", username);
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+            }
+
             // Account-specific counter increments only after confirming account existence.
             var accountLimit = await _runtime.RateLimitGuard.RegisterAttempt(
                 RateLimitRequestType.Login,

@@ -66,7 +66,7 @@
 - Remediation:
   - Add test covering first attempt failing after lock acquisition and second attempt behavior.
   - Assert expected policy explicitly (allow retry or reject by design).
-- Status: TODO
+- Status: DONE
 - Commit message: `add external login retry policy regression coverage`
 
 ### REF-003

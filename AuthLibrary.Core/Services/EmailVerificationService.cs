@@ -81,7 +81,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
             "/verify-email?token=");
         if (emailResult.IsFailure)
         {
-            _runtime.Logger.LogWarning("Resend interno fallito per {email} con code {code}", email, emailResult.ErrorCode);
+            _runtime.Logger.LogWarning("Resend interno fallito con code {code}", emailResult.ErrorCode);
             _runtime.Logger.LogDebug("Resend interno fallito per {email}: {error}", email, emailResult.Error);
             return Result.Ok(genericResponse);
         }
@@ -182,7 +182,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         }
         catch (Exception ex)
         {
-            _runtime.Logger.LogError(ex, "Invio email {type} fallito per {email}", type, email);
+            _runtime.Logger.LogError(ex, "Invio email {type} fallito", type);
             return AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email. Riprova piu tardi.");
         }
 

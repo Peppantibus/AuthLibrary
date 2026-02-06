@@ -106,7 +106,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         }
         catch (Exception ex)
         {
-            _runtime.Logger.LogError(ex, "Invio email di verifica fallito per {email}", user.Email);
+            _runtime.Logger.LogError(ex, "Invio email di verifica fallito");
             emailResult = AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email di verifica. Riprova piu tardi.");
         }
 

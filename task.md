@@ -56,7 +56,7 @@
   - Remove or mask email/user identifiers from Warning/Error logs.
   - Keep raw identifiers only in Debug-level logs.
   - Add targeted tests/assertions for log templates where feasible.
-- Status: TODO
+- Status: DONE
 - Commit message: `reduce pii exposure in warning and error logs`
 
 ### SEC-005

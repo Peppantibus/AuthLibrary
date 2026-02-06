@@ -80,15 +80,14 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         }
         catch (Exception ex)
         {
-            _runtime.Logger.LogError(ex, "RecoveryPassword invio email fallito per {email}", email);
+            _runtime.Logger.LogError(ex, "RecoveryPassword invio email fallito");
             return Result.Ok(genericResponse);
         }
 
         if (emailResult.IsFailure)
         {
             _runtime.Logger.LogWarning(
-                "RecoveryPassword invio email interno fallito per {email} con code {code}",
-                email,
+                "RecoveryPassword invio email interno fallito con code {code}",
                 emailResult.ErrorCode);
             _runtime.Logger.LogDebug("RecoveryPassword invio email interno fallito per {email}: {error}", email, emailResult.Error);
             return Result.Ok(genericResponse);

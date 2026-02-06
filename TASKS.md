@@ -140,7 +140,7 @@
 - Action:
   - Add explicit limits and format checks for key auth inputs.
 - Benefit: Better resilience and predictable behavior under malformed input.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-005: strengthen input validation limits and formats`
 
 ### REF-006

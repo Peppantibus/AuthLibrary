@@ -178,7 +178,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             await _runtime.Repository.SaveChangesAsync();
         });
 
-        _runtime.Logger.LogInformation("Password resettata per utente id {id}", user.Id);
+        _runtime.Logger.LogDebug("Password resettata con successo");
         return Result.Ok(true);
     }
 

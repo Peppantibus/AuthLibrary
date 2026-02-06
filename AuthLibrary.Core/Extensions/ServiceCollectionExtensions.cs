@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         where TUser : class, IAuthUser
     {
         var startupSettings = AuthLibraryOptionsValidator.Validate(config);
+        services.AddHttpContextAccessor();
 
         services.Configure<JwtSettings>(config.GetSection("JwtSettings"));
         services.Configure<SecuritySettings>(config.GetSection("SecuritySettings"));

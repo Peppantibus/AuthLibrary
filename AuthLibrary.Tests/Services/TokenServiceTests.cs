@@ -201,7 +201,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "plain-refresh-token";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -252,7 +252,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "plain-refresh-token";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -297,7 +297,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "plain-refresh-token";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -345,7 +345,7 @@ public class TokenServiceTests
     public async Task RefreshToken_WithExpiredToken_ThrowsInvalidOperationException()
     {
         // Arrange
-        var plainToken = "expired-token";
+        var plainToken = "expired-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -373,7 +373,7 @@ public class TokenServiceTests
     public async Task RefreshToken_WithRevokedToken_ThrowsInvalidOperationException()
     {
         // Arrange
-        var plainToken = "revoked-token";
+        var plainToken = "revoked-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -405,7 +405,7 @@ public class TokenServiceTests
             .ReturnsAsync((RefreshToken?)null);
 
         // Act & Assert
-        var act = async () => await _tokenService.RefreshToken("non-existent-token");
+        var act = async () => await _tokenService.RefreshToken("non-existent-token-0123456789abcdef");
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*non valido*");
     }
@@ -414,7 +414,7 @@ public class TokenServiceTests
     public async Task RefreshToken_WithReusedToken_InvalidatesSessionAndThrows()
     {
         // Arrange - Simulating token reuse attack
-        var plainToken = "reused-token";
+        var plainToken = "reused-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -451,7 +451,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "old-token";
+        var plainToken = "old-token-0123456789abcdef0123456789";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -490,7 +490,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-999";
-        var plainToken = "valid-token-no-user";
+        var plainToken = "valid-token-no-user-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -541,3 +541,4 @@ public class TokenServiceTests
         result.Error.Should().Contain("token non valido");
     }
 }
+

@@ -10,7 +10,7 @@ public static class InputValidators
     private const int MaxUsernameLength = 100;
     private const int MaxEmailLength = 254;
     private const int MinTokenLength = 32;
-    private const int MaxTokenLength = 1024;
+    private const int MaxTokenLength = 512;
     private const int MaxPasswordLength = 256;
     private static readonly Regex UsernameRegex = new("^[a-zA-Z0-9._@+-]+$", RegexOptions.Compiled);
     private static readonly Regex TokenRegex = new("^[A-Za-z0-9+/=_-]+$", RegexOptions.Compiled);

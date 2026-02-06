@@ -242,9 +242,15 @@ public class AuthServiceBasicTests
         // Arrange
         var username = "testuser";
         var password = "Password123!";
+        var salt = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        var saltBytes = Convert.FromBase64String(salt);
+        var pepper = _securitySettings.Value.Pepper;
+        var passwordHash = GenerateArgon2Hash(password, saltBytes, pepper);
 
         var user = TestDataBuilder.User()
             .WithUsername(username)
+            .WithPassword(passwordHash)
+            .WithSalt(salt)
             .WithEmailVerified(false) // Not verified
             .Build();
 
@@ -1199,7 +1205,7 @@ public class AuthServiceBasicTests
     public async Task VerifyMail_WithValidToken_MarksEmailVerified()
     {
         // Arrange
-        var token = "verify-token";
+        var token = "verify-token-0123456789abcdef0123456789";
         var tokenHash = HashToken(token);
 
         var user = TestDataBuilder.User()
@@ -1241,7 +1247,7 @@ public class AuthServiceBasicTests
     public async Task VerifyMail_WhenUserMissing_InvalidatesTokenAndReturnsFalse()
     {
         // Arrange
-        var token = "verify-token-user-missing";
+        var token = "verify-token-user-missing-0123456789abcdef";
         var tokenHash = HashToken(token);
         var entry = new EmailVerifiedToken
         {
@@ -1395,7 +1401,7 @@ public class AuthServiceBasicTests
     public async Task ResetPasswordRedirect_WithExpiredToken_ReturnsFalseAndRemovesToken()
     {
         // Arrange
-        var token = "expired-token";
+        var token = "expired-token-0123456789abcdef012345";
         var tokenHash = HashToken(token);
 
         var entry = new PasswordResetToken
@@ -1533,3 +1539,4 @@ public class AuthServiceBasicTests
 
     #endregion
 }
+

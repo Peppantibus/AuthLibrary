@@ -11,6 +11,9 @@ internal sealed record ValidatedStartupSettings(bool RequireRedis, string? Redis
 
 internal static class AuthLibraryOptionsValidator
 {
+    private const int MaxAccessTokenLifetimeMinutes = 60;
+    private const int MaxRefreshTokenLifetimeDays = 90;
+
     public static ValidatedStartupSettings Validate(IConfiguration config)
     {
         var jwt = BindRequiredSection<JwtSettings>(config, "JwtSettings");
@@ -87,6 +90,11 @@ internal static class AuthLibraryOptionsValidator
         if (settings.AccessTokenLifetimeMinutes <= 0)
         {
             throw new InvalidOperationException("JwtSettings:AccessTokenLifetimeMinutes deve essere maggiore di 0.");
+        }
+
+        if (settings.AccessTokenLifetimeMinutes > MaxAccessTokenLifetimeMinutes)
+        {
+            throw new InvalidOperationException($"JwtSettings:AccessTokenLifetimeMinutes deve essere <= {MaxAccessTokenLifetimeMinutes}.");
         }
     }
 
@@ -174,6 +182,11 @@ internal static class AuthLibraryOptionsValidator
         if (settings.RefreshTokenLifetimeDays <= 0)
         {
             throw new InvalidOperationException("RefreshTokenSettings:RefreshTokenLifetimeDays deve essere maggiore di 0.");
+        }
+
+        if (settings.RefreshTokenLifetimeDays > MaxRefreshTokenLifetimeDays)
+        {
+            throw new InvalidOperationException($"RefreshTokenSettings:RefreshTokenLifetimeDays deve essere <= {MaxRefreshTokenLifetimeDays}.");
         }
     }
 

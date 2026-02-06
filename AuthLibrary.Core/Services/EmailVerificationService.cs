@@ -38,7 +38,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         {
             _runtime.Logger.LogWarning("Resend bloccato o in cooldown");
             _runtime.Logger.LogDebug("Resend bloccato/cooldown per email {email}", email);
-            return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, gateResult.Error);
+            return Result.Ok(genericResponse);
         }
 
         var user = await _runtime.Repository.GetUserByEmailAsync(normalizedEmail);

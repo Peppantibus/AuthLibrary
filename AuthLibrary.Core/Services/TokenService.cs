@@ -6,6 +6,7 @@ using AuthLibrary.Configuration;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
 using AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -81,6 +82,12 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
     public async Task<RefreshTokenDto> RefreshToken(string token)
     {
+        var tokenValidation = InputValidators.ValidateToken(token);
+        if (tokenValidation.IsFailure)
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+
         var (result, user) = await ValidateRefreshTokenWithUser(token);
 
         var accessToken = GenerateAccessToken(user);

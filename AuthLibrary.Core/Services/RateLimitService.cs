@@ -188,15 +188,17 @@ public class RateLimitService : IRateLimitService
     public async Task Reset(RateLimitRequestType type, string identifier)
     {
         var normalizedIdentifier = NormalizeIdentifier(identifier);
-        var ip = GetClientIP(normalizedIdentifier);
         var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
-        await _redisService.Remove($"rl:attempt:{type}:ip:{ip}");
-
-        if (hasIdentifier)
+        // Preserve IP counters across successful authentications to avoid brute-force bypass
+        // via alternating successful/failed attempts from the same source.
+        if (!hasIdentifier)
         {
-            await _redisService.Remove($"rl:attempt:{type}:{normalizedIdentifier}");
+            return;
         }
+
+        await _redisService.Remove($"rl:attempt:{type}:{normalizedIdentifier}");
+        await _redisService.Remove($"rl:lock:{type}:{normalizedIdentifier}");
     }
 
     public async Task<bool> IsInCooldown(RateLimitRequestType type, string identifier)

@@ -44,10 +44,8 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
             user.Username = user.Username.Trim();
         }
 
-        if (string.IsNullOrWhiteSpace(user.Id) || user.Id.Length > 128 || user.Id.Any(char.IsControl))
-        {
-            user.Id = Guid.NewGuid().ToString();
-        }
+        // Keep identity server-owned to prevent caller-controlled account identifiers.
+        user.Id = Guid.NewGuid().ToString();
 
         var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Register,

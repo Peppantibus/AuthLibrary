@@ -164,7 +164,7 @@ public class RateLimitServiceTests
     }
 
     [Fact]
-    public async Task Reset_RemovesAttemptsForBothIpAndUser()
+    public async Task Reset_RemovesOnlyUserScopedState()
     {
         // Arrange
         var identifier = "user@test.com";
@@ -173,8 +173,9 @@ public class RateLimitServiceTests
         await _rateLimitService.Reset(RateLimitRequestType.Login, identifier);
 
         // Assert
-        _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Once);
         _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:{identifier}"), Times.Once);
+        _redisServiceMock.Verify(x => x.Remove($"rl:lock:{RateLimitRequestType.Login}:{identifier}"), Times.Once);
+        _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Never);
     }
 
     [Fact]

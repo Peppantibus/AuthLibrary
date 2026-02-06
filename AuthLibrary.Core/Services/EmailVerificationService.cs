@@ -75,7 +75,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
             "/verify-email?token=");
         if (emailResult.IsFailure)
         {
-            return Result.Fail(emailResult.Error);
+            return Result.Fail(emailResult.Error, emailResult.ErrorCode);
         }
 
         _runtime.Logger.LogInformation("Email di verifica reinviata");
@@ -151,24 +151,32 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         {
             _runtime.Logger.LogWarning("Tentativi eccessivi per {type}. Utente bloccato.", type);
             _runtime.Logger.LogDebug("Tentativi eccessivi per {type} email {email}. Utente bloccato.", type, email);
-            return Result.Fail(rateLimitResult.Error);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
-        var url = $"{_runtime.AuthSettings.FrontendUrl}{urlPath}{Uri.EscapeDataString(plainToken)}";
-        var html = await _runtime.TemplateService.RenderTemplateAsync(templateName, new Dictionary<string, string>
+        try
         {
-            { "username", username },
-            { "url", url }
-        });
+            var url = $"{_runtime.AuthSettings.FrontendUrl}{urlPath}{Uri.EscapeDataString(plainToken)}";
+            var html = await _runtime.TemplateService.RenderTemplateAsync(templateName, new Dictionary<string, string>
+            {
+                { "username", username },
+                { "url", url }
+            });
 
-        await _runtime.MailService.SendAsync(new MailDto
+            await _runtime.MailService.SendAsync(new MailDto
+            {
+                From = _runtime.MailSettings.AppMail,
+                EmailTo = email,
+                Subject = subject,
+                Body = html,
+                IsHtml = true
+            });
+        }
+        catch (Exception ex)
         {
-            From = _runtime.MailSettings.AppMail,
-            EmailTo = email,
-            Subject = subject,
-            Body = html,
-            IsHtml = true
-        });
+            _runtime.Logger.LogError(ex, "Invio email {type} fallito per {email}", type, email);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email. Riprova piu tardi.");
+        }
 
         _runtime.Logger.LogInformation("Email {type} inviata", type);
         _runtime.Logger.LogDebug("Email {type} inviata a {email}", type, email);

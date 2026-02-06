@@ -877,6 +877,47 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task ResendVerificationEmail_WhenMailSendThrows_ReturnsTypedFailure()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithEmailVerified(false)
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, user.Email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(user.Email))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.RemoveEmailVerifiedTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .ThrowsAsync(new InvalidOperationException("smtp down"));
+
+        // Act
+        var result = await _authService.ResendVerificationEmail(user.Email);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(AuthErrorCode.RecoveryError.ToString());
+    }
+
+    [Fact]
     public async Task VerifyMail_WithValidToken_MarksEmailVerified()
     {
         // Arrange
@@ -996,6 +1037,48 @@ public class AuthServiceBasicTests
         result.Value.Should().Contain("reset");
         _repositoryMock.Verify(x => x.AddPasswordResetTokenAsync(It.IsAny<PasswordResetToken>()), Times.Once);
         _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RecoveryPassword_WhenMailSendThrows_ReturnsTypedFailure()
+    {
+        // Arrange
+        var email = "test@example.com";
+        var user = TestDataBuilder.User()
+            .WithId("user-1")
+            .WithEmail(email)
+            .WithUsername("testuser")
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ResetPassword, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ResetPassword, email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(email))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.RemovePasswordResetTokensByUserIdAsync(user.Id))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddPasswordResetTokenAsync(It.IsAny<PasswordResetToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .ThrowsAsync(new InvalidOperationException("smtp down"));
+
+        // Act
+        var result = await _authService.RecoveryPassword(email);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(AuthErrorCode.RecoveryError.ToString());
     }
 
     [Fact]

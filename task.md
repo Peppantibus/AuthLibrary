@@ -88,7 +88,7 @@
 - Remediation:
   - Add robust exception handling around email dispatch in resend/recovery flows.
   - Return typed failures with stable error code semantics.
-- Status: TODO
+- Status: DONE
 - Commit message: `harden email send error handling in resend and recovery`
 
 ### REF-003

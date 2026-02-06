@@ -60,17 +60,27 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             await _runtime.Repository.SaveChangesAsync();
         });
 
-        var emailResult = await _emailVerificationService.SendAuthEmail(
-            RateLimitRequestType.ResetPassword,
-            normalizedEmail,
-            existingEntry.Username,
-            plainToken,
-            "ResetPassword.html",
-            "Recupero Password",
-            "/reset-password?token=");
+        Result emailResult;
+        try
+        {
+            emailResult = await _emailVerificationService.SendAuthEmail(
+                RateLimitRequestType.ResetPassword,
+                normalizedEmail,
+                existingEntry.Username,
+                plainToken,
+                "ResetPassword.html",
+                "Recupero Password",
+                "/reset-password?token=");
+        }
+        catch (Exception ex)
+        {
+            _runtime.Logger.LogError(ex, "RecoveryPassword invio email fallito per {email}", email);
+            return Result.Fail<string>("Impossibile inviare email. Riprova piu tardi.", AuthErrorCode.RecoveryError.ToString());
+        }
+
         if (emailResult.IsFailure)
         {
-            return Result.Fail<string>(emailResult.Error);
+            return Result.Fail<string>(emailResult.Error, emailResult.ErrorCode);
         }
 
         return Result.Ok("Se l'email e registrata, ti abbiamo inviato un link per il reset.");

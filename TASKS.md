@@ -87,7 +87,7 @@
 - Remediation:
   - Return same user-facing message for all resend outcomes.
   - Keep detail only in internal logs.
-- Status: TODO
+- Status: DONE
 - Commit message: `SEC-007: normalize resend verification responses`
 
 ## Refactoring Tasks

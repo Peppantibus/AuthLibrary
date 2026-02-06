@@ -19,13 +19,14 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
     {
         _runtime.Logger.LogInformation("Richiesta resend email verifica");
         _runtime.Logger.LogDebug("Richiesta resend email verifica per {email}", email);
+        const string genericResponse = "Se l'email e registrata e non ancora verificata, ti abbiamo inviato un link di verifica.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
 
         var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
             RateLimitRequestType.VerifyEmail,
             normalizedEmail,
-            "Troppi tentativi. Riprova più tardi.");
+            "Troppi tentativi. Riprova piu tardi.");
         if (blockedResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Resend bloccato (rate limit)");
@@ -48,14 +49,14 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
         if (user == null)
         {
             await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.VerifyEmail, normalizedEmail);
-            return Result.Ok("Se l'email è registrata, ti abbiamo inviato un link di verifica.");
+            return Result.Ok(genericResponse);
         }
 
         if (user.EmailVerified)
         {
             _runtime.Logger.LogInformation("Resend richiesto per email gia verificata");
             _runtime.Logger.LogDebug("Resend richiesto per email gia verificata {email}", email);
-            return Result.Ok("Se l'email è registrata e non ancora verificata, ti abbiamo inviato un link di verifica.");
+            return Result.Ok(genericResponse);
         }
 
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
@@ -83,7 +84,7 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
 
         _runtime.Logger.LogInformation("Email di verifica reinviata");
         _runtime.Logger.LogDebug("Email di verifica reinviata a {email}", email);
-        return Result.Ok("Email di verifica inviata.");
+        return Result.Ok(genericResponse);
     }
 
     public async Task<Result<bool>> VerifyMail(string token)

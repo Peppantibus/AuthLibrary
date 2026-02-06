@@ -104,7 +104,7 @@
   - Enforce server-side user ID assignment in registration when missing/invalid.
   - Document mandatory unique constraints and safe mapping rules for host repositories.
   - Add integration tests/guidance for secure ID handling.
-- Status: TODO
+- Status: DONE
 - Commit message: `harden user id handling in registration contracts`
 
 ## Reliability & Refactoring Tasks

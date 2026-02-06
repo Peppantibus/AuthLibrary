@@ -783,6 +783,53 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task AddUser_WithMissingId_AssignsServerGeneratedId()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithId(string.Empty)
+            .WithEmail("test@example.com")
+            .WithUsername("testuser")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        string passwordError = string.Empty;
+        _passwordValidatorMock.Setup(x => x.IsValid(user.Password, out passwordError))
+            .Returns(true);
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.UserExistsAsync(user.Username, user.Email))
+            .ReturnsAsync(false);
+        _repositoryMock.Setup(x => x.AddUserAsync(It.IsAny<TestUser>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _templateServiceMock.Setup(x => x.RenderTemplateAsync(It.IsAny<string>(), It.IsAny<Dictionary<string, string>>()))
+            .ReturnsAsync("<html>ok</html>");
+        _mailServiceMock.Setup(x => x.SendAsync(It.IsAny<MailDto>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        user.Id.Should().NotBeNullOrWhiteSpace();
+        Guid.TryParse(user.Id, out _).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task AddUser_WhenRateLimited_ReturnsFailure()
     {
         // Arrange

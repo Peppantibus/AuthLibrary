@@ -100,6 +100,50 @@ public class ServiceCollectionExtensionsTests
             .WithMessage("*JwtSettings:Key*");
     }
 
+    [Fact]
+    public void AddAuthLibrary_WithPartialRateLimitRules_UsesMergedDefaults()
+    {
+        // Arrange
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["RateLimit:Rules:Login:MaxUserAttempts"] = "8",
+            ["RateLimit:Rules:Login:MaxIpAttempts"] = "40",
+            ["RateLimit:Rules:Login:AttemptWindow"] = "00:10:00",
+            ["RateLimit:Rules:Login:LockDuration"] = "00:02:00",
+            ["RateLimit:RequireRedis"] = "false"
+        });
+        var services = new ServiceCollection();
+
+        // Act
+        services.AddAuthLibrary<TestUser>(config);
+        var provider = services.BuildServiceProvider();
+
+        // Assert
+        provider.GetRequiredService<IRateLimitService>().Should().NotBeNull();
+    }
+
+    [Fact]
+    public void AddAuthLibrary_WithInvalidRateLimitRuleName_Throws()
+    {
+        // Arrange
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["RateLimit:Rules:UnknownType:MaxUserAttempts"] = "2",
+            ["RateLimit:Rules:UnknownType:MaxIpAttempts"] = "5",
+            ["RateLimit:Rules:UnknownType:AttemptWindow"] = "00:01:00",
+            ["RateLimit:Rules:UnknownType:LockDuration"] = "00:01:00",
+            ["RateLimit:RequireRedis"] = "false"
+        });
+        var services = new ServiceCollection();
+
+        // Act
+        var act = () => services.AddAuthLibrary<TestUser>(config);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*RateLimit:Rules contiene tipo non supportato*");
+    }
+
     private static IConfiguration BuildConfig(IDictionary<string, string?> overrides)
     {
         var settings = new Dictionary<string, string?>

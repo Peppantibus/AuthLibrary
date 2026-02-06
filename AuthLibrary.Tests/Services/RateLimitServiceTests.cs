@@ -345,4 +345,33 @@ public class RateLimitServiceTests
         // Assert
         result.Should().BeFalse();
     }
+
+    [Fact]
+    public void BuildConfig_WithPartialOverrides_MergesWithDefaults()
+    {
+        // Arrange
+        var settings = new RateLimitSettings
+        {
+            Rules = new Dictionary<string, RateLimitConfiguration>
+            {
+                ["Login"] = new RateLimitConfiguration
+                {
+                    MaxUserAttempts = 7,
+                    MaxIpAttempts = 30,
+                    AttemptWindow = TimeSpan.FromMinutes(10),
+                    LockDuration = TimeSpan.FromMinutes(2)
+                }
+            }
+        };
+
+        // Act
+        var config = RateLimitService.BuildConfig(settings);
+
+        // Assert
+        config[RateLimitRequestType.Login].MaxUserAttempts.Should().Be(7);
+        config.Should().ContainKey(RateLimitRequestType.Register);
+        config.Should().ContainKey(RateLimitRequestType.VerifyEmail);
+        config.Should().ContainKey(RateLimitRequestType.ResetPassword);
+        config.Should().ContainKey(RateLimitRequestType.ExternalLogin);
+    }
 }

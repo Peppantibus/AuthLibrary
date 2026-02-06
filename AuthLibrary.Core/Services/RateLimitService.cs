@@ -21,7 +21,7 @@ public class RateLimitService : IRateLimitService
     {
         _redisService = redisService;
         _contextAccessor = contextAccessor;
-        _config = config ?? BuildConfig();
+        _config = MergeWithDefaults(config);
         _trustedProxyIps = BuildTrustedProxySet(trustedProxyIps);
     }
 
@@ -201,7 +201,7 @@ public class RateLimitService : IRateLimitService
 
     public static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildConfig(RateLimitSettings? settings = null)
     {
-        var config = new Dictionary<RateLimitRequestType, RateLimitConfiguration>();
+        var config = BuildDefaultConfig();
         if (settings?.Rules != null && settings.Rules.Count > 0)
         {
             foreach (var entry in settings.Rules)
@@ -213,11 +213,31 @@ public class RateLimitService : IRateLimitService
             }
         }
 
-        if (config.Count > 0)
+        return config;
+    }
+
+    private static Dictionary<RateLimitRequestType, RateLimitConfiguration> MergeWithDefaults(
+        Dictionary<RateLimitRequestType, RateLimitConfiguration>? config)
+    {
+        var merged = BuildDefaultConfig();
+        if (config == null)
         {
-            return config;
+            return merged;
         }
 
+        foreach (var entry in config)
+        {
+            if (entry.Value != null)
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
+
+    private static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildDefaultConfig()
+    {
         return new()
         {
             {

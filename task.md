@@ -31,7 +31,7 @@
   - Merge default rate-limit rules with user overrides.
   - Add startup validation to ensure all required `RateLimitRequestType` entries exist.
   - Fail early with clear diagnostics when config is invalid.
-- Status: TODO
+- Status: DONE
 - Commit message: `harden rate-limit config merge and startup validation`
 
 ### SEC-03

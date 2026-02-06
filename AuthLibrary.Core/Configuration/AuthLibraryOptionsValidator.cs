@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Mail;
 using System.Text;
+using AuthLibrary.Enum;
+using AuthLibrary.Services;
 using Microsoft.Extensions.Configuration;
 
 namespace AuthLibrary.Configuration;
@@ -183,6 +185,11 @@ internal static class AuthLibraryOptionsValidator
 
         foreach (var (ruleName, rule) in settings.Rules)
         {
+            if (!System.Enum.TryParse<RateLimitRequestType>(ruleName, ignoreCase: true, out _))
+            {
+                throw new InvalidOperationException($"RateLimit:Rules contiene tipo non supportato: {ruleName}");
+            }
+
             if (rule == null)
             {
                 throw new InvalidOperationException($"RateLimit:Rules:{ruleName} non valido.");
@@ -206,6 +213,15 @@ internal static class AuthLibraryOptionsValidator
             if (rule.LockDuration <= TimeSpan.Zero)
             {
                 throw new InvalidOperationException($"RateLimit:Rules:{ruleName}:LockDuration deve essere maggiore di 0.");
+            }
+        }
+
+        var mergedRules = RateLimitService.BuildConfig(settings);
+        foreach (var requestType in System.Enum.GetValues<RateLimitRequestType>())
+        {
+            if (!mergedRules.ContainsKey(requestType))
+            {
+                throw new InvalidOperationException($"RateLimit:Rules configurazione mancante per {requestType}.");
             }
         }
 

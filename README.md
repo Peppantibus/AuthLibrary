@@ -335,7 +335,7 @@ MailService
 - RetryDelayMilliseconds: delay between retries (default 500).
 
 AuthSettings
-- FrontendUrl: base URL for verify/reset links.
+- FrontendUrl: base URL for verify/reset links. Must use HTTPS in production (HTTP allowed only for local loopback development).
 
 TemplateSettings
 - BasePath: folder for HTML templates.

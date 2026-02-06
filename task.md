@@ -32,7 +32,7 @@
   - Enforce HTTPS at startup validation (optionally allow loopback for local development only).
   - Add tests that reject non-HTTPS production URLs.
   - Update README configuration examples to emphasize HTTPS-only behavior.
-- Status: TODO
+- Status: DONE
 - Commit message: `enforce https-only frontend urls for auth token links`
 
 ### SEC-003

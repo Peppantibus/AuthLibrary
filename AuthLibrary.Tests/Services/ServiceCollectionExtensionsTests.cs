@@ -101,6 +101,43 @@ public class ServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddAuthLibrary_WithHttpFrontendUrlOnNonLoopback_Throws()
+    {
+        // Arrange
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["AuthSettings:FrontendUrl"] = "http://example.com",
+            ["RateLimit:RequireRedis"] = "false"
+        });
+        var services = new ServiceCollection();
+
+        // Act
+        var act = () => services.AddAuthLibrary<TestUser>(config);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*AuthSettings:FrontendUrl*HTTPS*");
+    }
+
+    [Fact]
+    public void AddAuthLibrary_WithHttpFrontendUrlOnLoopback_DoesNotThrow()
+    {
+        // Arrange
+        var config = BuildConfig(new Dictionary<string, string?>
+        {
+            ["AuthSettings:FrontendUrl"] = "http://localhost:5173",
+            ["RateLimit:RequireRedis"] = "false"
+        });
+        var services = new ServiceCollection();
+
+        // Act
+        var act = () => services.AddAuthLibrary<TestUser>(config);
+
+        // Assert
+        act.Should().NotThrow();
+    }
+
+    [Fact]
     public void AddAuthLibrary_WithShortJwtKey_Throws()
     {
         // Arrange

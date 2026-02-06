@@ -153,10 +153,11 @@ internal static class AuthLibraryOptionsValidator
             throw new InvalidOperationException("AuthSettings:FrontendUrl non valido.");
         }
 
-        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        var isHttps = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var isLocalLoopback = uri.IsLoopback;
+        if (!isHttps && !isLocalLoopback)
         {
-            throw new InvalidOperationException("AuthSettings:FrontendUrl deve usare schema http o https.");
+            throw new InvalidOperationException("AuthSettings:FrontendUrl deve usare HTTPS (HTTP consentito solo in loopback locale).");
         }
     }
 

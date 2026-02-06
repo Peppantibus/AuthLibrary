@@ -160,7 +160,7 @@
 - Action:
   - Add targeted tests for security-critical edge cases and regressions.
 - Benefit: Better regression protection on sensitive flows.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-007: add security regression tests for critical edge cases`
 
 ### REF-008

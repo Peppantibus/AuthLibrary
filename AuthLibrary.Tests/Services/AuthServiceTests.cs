@@ -286,6 +286,79 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task ExternalLoginWithGoogle_StoresReplayCooldownUsingHashedToken()
+    {
+        // Arrange
+        var idToken = "google-id-token-for-replay-cache";
+        var externalUser = new ExternalUserInfo
+        {
+            Subject = "google-subject-1",
+            Email = "test@example.com",
+            EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+            GivenName = "Test",
+            FamilyName = "User"
+        };
+
+        string? replayKey = null;
+        var replayDuration = TimeSpan.Zero;
+
+        _externalTokenValidatorMock
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
+            .ReturnsAsync(externalUser);
+
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock
+            .Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Callback<RateLimitRequestType, string, TimeSpan>((_, identifier, duration) =>
+            {
+                replayKey = identifier;
+                replayDuration = duration;
+            })
+            .Returns(Task.CompletedTask);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.Login, "test@example.com"))
+            .Returns(Task.CompletedTask);
+
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("test@example.com")
+            .AsVerified()
+            .Build();
+
+        _repositoryMock.Setup(x => x.GetExternalLoginAsync("google", "google-subject-1"))
+            .ReturnsAsync(new ExternalAuthLogin { Provider = "google", Subject = "google-subject-1", UserId = user.Id });
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(user.Id))
+            .ReturnsAsync(user);
+
+        var expectedAccessToken = new AccessTokenResult { Token = "jwt-token", ExpiresInSeconds = 900 };
+        var expectedRefreshToken = new RefreshTokenIssueResult
+        {
+            PlainToken = "refresh-token",
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            UserId = user.Id
+        };
+
+        _tokenServiceMock.Setup(x => x.GenerateAccessToken(user))
+            .Returns(expectedAccessToken);
+        _tokenServiceMock.Setup(x => x.CreateRefreshToken(user))
+            .ReturnsAsync(expectedRefreshToken);
+
+        // Act
+        var result = await _authService.ExternalLoginWithGoogle(idToken);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        replayKey.Should().Be(HashToken(idToken));
+        replayKey.Should().NotBe(idToken);
+        replayDuration.Should().BeGreaterThan(TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
     public async Task ExternalLoginWithGoogle_WhenUserMissing_CreatesUserAndReturnsTokens()
     {
         // Arrange

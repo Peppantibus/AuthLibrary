@@ -254,6 +254,34 @@ public class RateLimitServiceTests
         _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Once);
     }
 
+    [Fact]
+    public async Task GetClientIP_WithUntrustedProxyHeader_UsesRemoteIpFallback()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.10");
+        context.Request.Headers["X-Forwarded-For"] = "203.0.113.10";
+
+        var accessor = new Mock<IHttpContextAccessor>();
+        accessor.Setup(x => x.HttpContext).Returns(context);
+
+        var redis = MockFactory.CreateRedisService();
+        redis.Setup(x => x.GetValue(It.IsAny<string>())).ReturnsAsync((string?)null);
+
+        var service = new RateLimitService(
+            redis.Object,
+            accessor.Object,
+            trustedProxyIps: Array.Empty<string>());
+
+        // Act
+        await service.IsBlocked(RateLimitRequestType.Login, identifier);
+
+        // Assert
+        redis.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:10.0.0.10"), Times.Once);
+        redis.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:203.0.113.10"), Times.Never);
+    }
+
     [Theory]
     [InlineData(RateLimitRequestType.Login, 5, 20)]
     [InlineData(RateLimitRequestType.Register, 3, 10)]

@@ -293,6 +293,55 @@ public class TokenServiceTests
     }
 
     [Fact]
+    public async Task TryRefreshToken_WithConcurrentRequests_OnlyOneSucceeds()
+    {
+        // Arrange
+        var userId = "user-123";
+        var plainToken = "plain-refresh-token";
+        var hashedToken = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
+        );
+
+        var user = TestDataBuilder.User()
+            .WithId(userId)
+            .WithUsername("testuser")
+            .Build();
+
+        var existingToken = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = hashedToken,
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            ExpiresAt = DateTime.UtcNow.AddDays(29),
+            RevokedAt = null,
+            ReplacedByToken = null
+        };
+
+        var rotateCalls = 0;
+        _repositoryMock.Setup(x => x.GetRefreshTokenAsync(It.IsAny<string>()))
+            .ReturnsAsync(existingToken);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref rotateCalls) == 1);
+
+        // Act
+        var first = _tokenService.TryRefreshToken(plainToken);
+        var second = _tokenService.TryRefreshToken(plainToken);
+        var results = await Task.WhenAll(first, second);
+
+        // Assert
+        results.Count(x => x.IsSuccess).Should().Be(1);
+        results.Count(x => x.IsFailure).Should().Be(1);
+        results.Single(x => x.IsFailure).Error.Should().Contain("token non valido");
+    }
+
+    [Fact]
     public async Task RefreshToken_WithExpiredToken_ThrowsInvalidOperationException()
     {
         // Arrange

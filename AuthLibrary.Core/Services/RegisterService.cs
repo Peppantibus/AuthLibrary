@@ -53,7 +53,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         {
             _runtime.Logger.LogWarning("Registrazione bloccata (rate limit)");
             _runtime.Logger.LogDebug("Registrazione bloccata per email {email} (rate limit)", user.Email);
-            return Result.Fail(rateLimitResult.Error);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
         var exists = await _runtime.Repository.UserExistsAsync(user.Username, normalizedEmail);
@@ -68,7 +68,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         {
             _runtime.Logger.LogWarning("Registrazione fallita: password debole");
             _runtime.Logger.LogDebug("Registrazione fallita: password debole per email {email}", user.Email);
-            return Result.Fail(passwordError);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid, passwordError);
         }
 
         var salt = RandomNumberGenerator.GetBytes(16);
@@ -107,7 +107,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         catch (Exception ex)
         {
             _runtime.Logger.LogError(ex, "Invio email di verifica fallito per {email}", user.Email);
-            emailResult = Result.Fail("Impossibile inviare email di verifica. Riprova piu tardi.");
+            emailResult = AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email di verifica. Riprova piu tardi.");
         }
 
         if (emailResult.IsFailure)
@@ -120,7 +120,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
                 await _runtime.Repository.RemoveEmailVerifiedTokenAsync(emailVerified);
                 await _runtime.Repository.SaveChangesAsync();
             });
-            return Result.Fail("Impossibile inviare email di verifica. Riprova piu tardi.");
+            return Result.Fail(emailResult.Error, emailResult.ErrorCode);
         }
 
         _runtime.Logger.LogInformation("Registrazione completata");

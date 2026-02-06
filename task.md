@@ -99,7 +99,7 @@
 - Remediation:
   - Align implementation to typed errors across remaining flows or adjust README contract explicitly.
   - Ensure docs and runtime behavior match.
-- Status: TODO
+- Status: DONE
 - Commit message: `align errorcode contract across docs and service failures`
 
 ### REF-004

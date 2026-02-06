@@ -114,16 +114,16 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         var validationResult = InputValidators.ValidateResetPassword(body);
         if (validationResult.IsFailure)
         {
-            return Result.Fail<bool>(validationResult.Error);
+            return AuthErrorCatalog.Fail<bool>(AuthErrorCode.UserDataInvalid, validationResult.Error);
         }
         if (body.Password != body.ConfirmPassword)
         {
-            return Result.Fail<bool>("password e confirm password devono essere uguali");
+            return AuthErrorCatalog.Fail<bool>(AuthErrorCode.UserDataInvalid, "password e confirm password devono essere uguali");
         }
         if (!_runtime.PasswordValidator.IsValid(body.Password, out var passwordError))
         {
             _runtime.Logger.LogWarning("ResetPassword fallito: password debole");
-            return Result.Fail<bool>(passwordError);
+            return AuthErrorCatalog.Fail<bool>(AuthErrorCode.UserDataInvalid, passwordError);
         }
 
         var tokenHash = AuthRuntime<TUser>.HashToken(body.Token);
@@ -145,7 +145,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         var user = await _runtime.Repository.GetUserByIdAsync(entry.UserId);
         if (user == null)
         {
-            return Result.Fail<bool>("errore durante il recupero");
+            return AuthErrorCatalog.Fail<bool>(AuthErrorCode.RecoveryError);
         }
 
         var salt = RandomNumberGenerator.GetBytes(16);

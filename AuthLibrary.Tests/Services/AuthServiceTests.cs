@@ -1109,7 +1109,7 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
-    public async Task RecoveryPassword_WhenMailSendThrows_ReturnsTypedFailure()
+    public async Task RecoveryPassword_WhenMailSendThrows_ReturnsGenericSuccess()
     {
         // Arrange
         var email = "test@example.com";
@@ -1146,8 +1146,8 @@ public class AuthServiceBasicTests
         var result = await _authService.RecoveryPassword(email);
 
         // Assert
-        result.IsSuccess.Should().BeFalse();
-        result.ErrorCode.Should().Be(AuthErrorCode.RecoveryError.ToString());
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().Contain("Se l'email e registrata");
     }
 
     [Fact]

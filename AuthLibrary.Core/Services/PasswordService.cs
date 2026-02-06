@@ -23,6 +23,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
     {
         _runtime.Logger.LogInformation("Richiesta reset password");
         _runtime.Logger.LogDebug("Richiesta reset password per email {email}", email);
+        const string genericResponse = "Se l'email e registrata, ti abbiamo inviato un link per il reset.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
 
@@ -44,7 +45,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.ResetPassword, normalizedEmail);
             _runtime.Logger.LogInformation("RecoveryPassword richiesto per email non esistente");
             _runtime.Logger.LogDebug("RecoveryPassword richiesto per email non esistente {email}", email);
-            return Result.Ok("Se l'email e registrata, ti abbiamo inviato un link per il reset.");
+            return Result.Ok(genericResponse);
         }
 
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
@@ -75,15 +76,20 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         catch (Exception ex)
         {
             _runtime.Logger.LogError(ex, "RecoveryPassword invio email fallito per {email}", email);
-            return Result.Fail<string>("Impossibile inviare email. Riprova piu tardi.", AuthErrorCode.RecoveryError.ToString());
+            return Result.Ok(genericResponse);
         }
 
         if (emailResult.IsFailure)
         {
-            return Result.Fail<string>(emailResult.Error, emailResult.ErrorCode);
+            _runtime.Logger.LogWarning(
+                "RecoveryPassword invio email interno fallito per {email} con code {code}",
+                email,
+                emailResult.ErrorCode);
+            _runtime.Logger.LogDebug("RecoveryPassword invio email interno fallito per {email}: {error}", email, emailResult.Error);
+            return Result.Ok(genericResponse);
         }
 
-        return Result.Ok("Se l'email e registrata, ti abbiamo inviato un link per il reset.");
+        return Result.Ok(genericResponse);
     }
 
     public async Task<Result<bool>> ResetPasswordRedirect(string token)

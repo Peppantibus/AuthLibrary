@@ -42,7 +42,7 @@
 - Remediation:
   - Return same generic response in recovery regardless of account existence and internal mail errors.
   - Preserve internal diagnostics without exposing state differences.
-- Status: TODO
+- Status: DONE
 - Commit message: `normalize recovery response semantics during email failures`
 
 ## Reliability & Refactoring Tasks

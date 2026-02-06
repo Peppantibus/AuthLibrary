@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
@@ -19,10 +20,28 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
 
     public async Task<Result> AddUser(TUser user)
     {
-        var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(user.Email);
-        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        if (user == null)
         {
-            user.Email = normalizedEmail;
+            return AuthErrorCatalog.Fail(AuthErrorCode.InvalidUser);
+        }
+
+        var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(user.Email);
+        var emailValidation = InputValidators.ValidateEmail(normalizedEmail);
+        if (emailValidation.IsFailure)
+        {
+            return AuthErrorCatalog.Fail(AuthErrorCode.InvalidEmail, emailValidation.Error);
+        }
+
+        var usernameValidation = InputValidators.ValidateUsername(user.Username);
+        if (usernameValidation.IsFailure)
+        {
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid, usernameValidation.Error);
+        }
+
+        user.Email = normalizedEmail;
+        if (!string.IsNullOrWhiteSpace(user.Username))
+        {
+            user.Username = user.Username.Trim();
         }
 
         var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
@@ -42,7 +61,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         {
             _runtime.Logger.LogWarning("Tentativo di registrazione con email/username gia usata");
             _runtime.Logger.LogDebug("Tentativo di registrazione con email/username gia usata: {email}", user.Email);
-            return Result.Fail("registrazione non valida");
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid);
         }
 
         if (!_runtime.PasswordValidator.IsValid(user.Password, out var passwordError))

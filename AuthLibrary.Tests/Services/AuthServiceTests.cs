@@ -535,6 +535,59 @@ public class AuthServiceBasicTests
     #region Register Tests
 
     [Fact]
+    public async Task AddUser_WithNullUser_ReturnsInvalidUser()
+    {
+        // Act
+        var result = await _authService.AddUser(null!);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(AuthErrorCode.InvalidUser.ToString());
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _repositoryMock.Verify(x => x.UserExistsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddUser_WithInvalidEmail_ReturnsFailureBeforeRateLimitAndRepository()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("invalid email")
+            .WithUsername("testuser")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(AuthErrorCode.InvalidEmail.ToString());
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _repositoryMock.Verify(x => x.UserExistsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddUser_WithInvalidUsername_ReturnsFailureBeforeRateLimitAndRepository()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("test@example.com")
+            .WithUsername("invalid username")
+            .WithPassword("ValidPassword123!")
+            .Build();
+
+        // Act
+        var result = await _authService.AddUser(user);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorCode.Should().Be(AuthErrorCode.RegistrationInvalid.ToString());
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _repositoryMock.Verify(x => x.UserExistsAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task AddUser_WithValidUser_ReturnsOkAndSendsVerificationEmail()
     {
         // Arrange

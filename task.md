@@ -64,7 +64,7 @@
 - Remediation:
   - Validate email and username in `AddUser` before rate-limit/repository calls.
   - Add null checks on `user` and return typed failures consistently.
-- Status: TODO
+- Status: DONE
 - Commit message: `enforce registration input hardening before persistence`
 
 ## Reliability & Refactoring Tasks

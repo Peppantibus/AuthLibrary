@@ -41,6 +41,21 @@ public class InMemoryCacheService : IRedisService
         return Task.CompletedTask;
     }
 
+    public Task<bool> TrySetValue(string key, string value, TimeSpan expiration)
+    {
+        var gate = GetLockStripe(key);
+        lock (gate)
+        {
+            if (_cache.TryGetValue(key, out _))
+            {
+                return Task.FromResult(false);
+            }
+
+            _cache.Set(key, value, expiration);
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<double> Increment(string key, double value)
     {
         var gate = GetLockStripe(key);

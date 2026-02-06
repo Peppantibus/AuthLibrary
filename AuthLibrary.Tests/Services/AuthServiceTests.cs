@@ -241,10 +241,9 @@ public class AuthServiceBasicTests
             .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
-        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
-            .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
-            .Returns(Task.CompletedTask);
+        _rateLimitServiceMock
+            .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .ReturnsAsync(true);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
             .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
@@ -307,16 +306,14 @@ public class AuthServiceBasicTests
             .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
-        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
-            .ReturnsAsync(false);
         _rateLimitServiceMock
-            .Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
             .Callback<RateLimitRequestType, string, TimeSpan>((_, identifier, duration) =>
             {
                 replayKey = identifier;
                 replayDuration = duration;
             })
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "test@example.com"))
             .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "test@example.com"))
@@ -377,10 +374,9 @@ public class AuthServiceBasicTests
             .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
 
-        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
-            .ReturnsAsync(false);
-        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
-            .Returns(Task.CompletedTask);
+        _rateLimitServiceMock
+            .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .ReturnsAsync(true);
         _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.Login, "newuser@example.com"))
             .ReturnsAsync(false);
         _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.Login, "newuser@example.com"))
@@ -490,8 +486,9 @@ public class AuthServiceBasicTests
         _externalTokenValidatorMock
             .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
             .ReturnsAsync(externalUser);
-        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>()))
-            .ReturnsAsync(true);
+        _rateLimitServiceMock
+            .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .ReturnsAsync(false);
 
         // Act
         var result = await _authService.ExternalLoginWithGoogle(idToken);

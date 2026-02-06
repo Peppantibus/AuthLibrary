@@ -225,6 +225,40 @@ public class RateLimitServiceTests
     }
 
     [Fact]
+    public async Task TryStartCooldown_WhenKeyMissing_ReturnsTrue()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var duration = TimeSpan.FromMinutes(5);
+        _redisServiceMock
+            .Setup(x => x.TrySetValue($"rl:cooldown:{RateLimitRequestType.VerifyEmail}:{identifier}", "1", duration))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _rateLimitService.TryStartCooldown(RateLimitRequestType.VerifyEmail, identifier, duration);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TryStartCooldown_WhenKeyExists_ReturnsFalse()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var duration = TimeSpan.FromMinutes(5);
+        _redisServiceMock
+            .Setup(x => x.TrySetValue($"rl:cooldown:{RateLimitRequestType.VerifyEmail}:{identifier}", "1", duration))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _rateLimitService.TryStartCooldown(RateLimitRequestType.VerifyEmail, identifier, duration);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task GetClientIP_WithSpoofedXForwardedFor_UsesRightmostNonTrustedIp()
     {
         // Arrange

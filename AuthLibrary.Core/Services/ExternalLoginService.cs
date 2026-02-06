@@ -44,7 +44,12 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         }
 
         var replayKey = AuthRuntime<TUser>.HashToken(idToken);
-        if (await _runtime.RateLimitService.IsInCooldown(RateLimitRequestType.ExternalLogin, replayKey))
+        var replayWindow = BuildReplayWindow(externalUser.ExpiresAtUtc);
+        var acquiredReplayLock = await _runtime.RateLimitService.TryStartCooldown(
+            RateLimitRequestType.ExternalLogin,
+            replayKey,
+            replayWindow);
+        if (!acquiredReplayLock)
         {
             _runtime.Logger.LogWarning("Google id_token replay rilevato");
             return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
@@ -119,10 +124,6 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         var accessToken = _runtime.TokenService.GenerateAccessToken(user);
         var refreshToken = await _runtime.TokenService.CreateRefreshToken(user);
         await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, email);
-        await _runtime.RateLimitService.StartCooldown(
-            RateLimitRequestType.ExternalLogin,
-            replayKey,
-            BuildReplayWindow(externalUser.ExpiresAtUtc));
 
         return Result.Ok(new RefreshTokenDto
         {

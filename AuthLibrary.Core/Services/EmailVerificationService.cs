@@ -19,7 +19,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
     public async Task<Result> ResendVerificationEmail(string email)
     {
         _runtime.Logger.LogInformation("Richiesta resend email verifica");
-        _runtime.Logger.LogDebug("Richiesta resend email verifica per {email}", email);
+        _runtime.Logger.LogDebug("Richiesta resend email verifica");
         const string genericResponse = "Se l'email e registrata e non ancora verificata, ti abbiamo inviato un link di verifica.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
@@ -37,7 +37,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         if (gateResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Resend bloccato o in cooldown");
-            _runtime.Logger.LogDebug("Resend bloccato/cooldown per email {email}", email);
+            _runtime.Logger.LogDebug("Resend bloccato/cooldown");
             return Result.Ok(genericResponse);
         }
 
@@ -51,7 +51,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         if (user.EmailVerified)
         {
             _runtime.Logger.LogInformation("Resend richiesto per email gia verificata");
-            _runtime.Logger.LogDebug("Resend richiesto per email gia verificata {email}", email);
+            _runtime.Logger.LogDebug("Resend richiesto per email gia verificata");
             await ApplyResendTransition(normalizedEmail);
             return Result.Ok(genericResponse);
         }
@@ -82,12 +82,12 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         if (emailResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Resend interno fallito con code {code}", emailResult.ErrorCode);
-            _runtime.Logger.LogDebug("Resend interno fallito per {email}: {error}", email, emailResult.Error);
+            _runtime.Logger.LogDebug("Resend interno fallito");
             return Result.Ok(genericResponse);
         }
 
         _runtime.Logger.LogInformation("Email di verifica reinviata");
-        _runtime.Logger.LogDebug("Email di verifica reinviata a {email}", email);
+        _runtime.Logger.LogDebug("Email di verifica reinviata");
         return Result.Ok(genericResponse);
     }
 
@@ -141,7 +141,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         });
 
         _runtime.Logger.LogInformation("Email verificata con successo");
-        _runtime.Logger.LogDebug("Email verificata con successo per utente {email}", user?.Email);
+        _runtime.Logger.LogDebug("Email verificata con successo");
         return Result.Ok(true);
     }
 
@@ -154,7 +154,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         string subject,
         string urlPath)
     {
-        _runtime.Logger.LogDebug("Preparazione invio email {type} a {email}", type, email);
+        _runtime.Logger.LogDebug("Preparazione invio email {type}", type);
 
         var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldownAndRegisterAttempt(
             type,
@@ -165,7 +165,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Tentativi eccessivi per {type}. Utente bloccato.", type);
-            _runtime.Logger.LogDebug("Tentativi eccessivi per {type} email {email}. Utente bloccato.", type, email);
+            _runtime.Logger.LogDebug("Tentativi eccessivi per {type}. Utente bloccato.", type);
             return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
@@ -194,7 +194,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         }
 
         _runtime.Logger.LogInformation("Email {type} inviata", type);
-        _runtime.Logger.LogDebug("Email {type} inviata a {email}", type, email);
+        _runtime.Logger.LogDebug("Email {type} inviata", type);
         await _runtime.RateLimitService.StartCooldown(type, email, TimeSpan.FromSeconds(60));
         return Result.Ok();
     }

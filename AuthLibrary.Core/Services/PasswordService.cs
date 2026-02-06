@@ -22,7 +22,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
     public async Task<Result<string>> RecoveryPassword(string email)
     {
         _runtime.Logger.LogInformation("Richiesta reset password");
-        _runtime.Logger.LogDebug("Richiesta reset password per email {email}", email);
+        _runtime.Logger.LogDebug("Richiesta reset password");
         const string genericResponse = "Se l'email e registrata, ti abbiamo inviato un link per il reset.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
@@ -40,7 +40,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         if (gateResult.IsFailure)
         {
             _runtime.Logger.LogWarning("RecoveryPassword bloccato o in cooldown");
-            _runtime.Logger.LogDebug("RecoveryPassword bloccato/cooldown per email {email}", email);
+            _runtime.Logger.LogDebug("RecoveryPassword bloccato/cooldown");
             return Result.Ok(gateResult.Error);
         }
 
@@ -49,7 +49,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         {
             await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.ResetPassword, normalizedEmail);
             _runtime.Logger.LogInformation("RecoveryPassword richiesto per email non esistente");
-            _runtime.Logger.LogDebug("RecoveryPassword richiesto per email non esistente {email}", email);
+            _runtime.Logger.LogDebug("RecoveryPassword richiesto per email non esistente");
             return Result.Ok(genericResponse);
         }
 
@@ -89,7 +89,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             _runtime.Logger.LogWarning(
                 "RecoveryPassword invio email interno fallito con code {code}",
                 emailResult.ErrorCode);
-            _runtime.Logger.LogDebug("RecoveryPassword invio email interno fallito per {email}: {error}", email, emailResult.Error);
+            _runtime.Logger.LogDebug("RecoveryPassword invio email interno fallito");
             return Result.Ok(genericResponse);
         }
 

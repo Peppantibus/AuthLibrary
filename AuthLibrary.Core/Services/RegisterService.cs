@@ -55,7 +55,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Registrazione bloccata (rate limit)");
-            _runtime.Logger.LogDebug("Registrazione bloccata per email {email} (rate limit)", user.Email);
+            _runtime.Logger.LogDebug("Registrazione bloccata (rate limit)");
             return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
@@ -63,14 +63,14 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         if (exists)
         {
             _runtime.Logger.LogWarning("Tentativo di registrazione con email/username gia usata");
-            _runtime.Logger.LogDebug("Tentativo di registrazione con email/username gia usata: {email}", user.Email);
+            _runtime.Logger.LogDebug("Tentativo di registrazione con email/username gia usata");
             return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid);
         }
 
         if (!_runtime.PasswordValidator.IsValid(user.Password, out var passwordError))
         {
             _runtime.Logger.LogWarning("Registrazione fallita: password debole");
-            _runtime.Logger.LogDebug("Registrazione fallita: password debole per email {email}", user.Email);
+            _runtime.Logger.LogDebug("Registrazione fallita: password debole");
             return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid, passwordError);
         }
 
@@ -116,7 +116,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         if (emailResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Invio email fallito, rollback registrazione");
-            _runtime.Logger.LogDebug("Invio email fallito per {email}, rollback registrazione", user.Email);
+            _runtime.Logger.LogDebug("Invio email fallito, rollback registrazione");
             await ExecuteInTransaction(async () =>
             {
                 await _runtime.Repository.RemoveUserAsync(user);
@@ -127,7 +127,7 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         }
 
         _runtime.Logger.LogInformation("Registrazione completata");
-        _runtime.Logger.LogDebug("Registrazione completata per utente {email}", user.Email);
+        _runtime.Logger.LogDebug("Registrazione completata");
         return Result.Ok();
     }
 

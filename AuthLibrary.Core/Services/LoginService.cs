@@ -23,7 +23,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
     public async Task<Result<RefreshTokenDto>> Login(string username, string password)
     {
         _runtime.Logger.LogInformation("Tentativo login");
-        _runtime.Logger.LogDebug("Tentativo login per utente {username}", username);
+        _runtime.Logger.LogDebug("Tentativo login");
 
         var validationResult = InputValidators.ValidateLogin(username, password);
         if (validationResult.IsFailure)
@@ -42,7 +42,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         if (preAuthRateLimit.IsFailure)
         {
             _runtime.Logger.LogWarning("Login bloccato");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (ip policy pre-auth)", username);
+            _runtime.Logger.LogDebug("Login bloccato (ip policy pre-auth)");
             return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserBlocked, preAuthRateLimit.Error);
         }
 
@@ -79,7 +79,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             if (!userExists)
             {
                 _runtime.Logger.LogWarning("Login fallito: utente non trovato");
-                _runtime.Logger.LogDebug("Login fallito: utente {username} non trovato", username);
+                _runtime.Logger.LogDebug("Login fallito: utente non trovato");
                 return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
             }
 
@@ -91,7 +91,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             if (!user.EmailVerified)
             {
                 _runtime.Logger.LogWarning("Login fallito: email non verificata");
-                _runtime.Logger.LogDebug("Login fallito: email non verificata per utente {username}", username);
+                _runtime.Logger.LogDebug("Login fallito: email non verificata");
                 return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
             }
 
@@ -103,12 +103,12 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
             if (accountLimit.IsFailure)
             {
                 _runtime.Logger.LogWarning("Login bloccato (rate limit account)");
-                _runtime.Logger.LogDebug("Login bloccato per utente {username} (account rate limit)", username);
+                _runtime.Logger.LogDebug("Login bloccato (account rate limit)");
                 return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.RateLimited, accountLimit.Error);
             }
 
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");
-            _runtime.Logger.LogDebug("Login fallito: password errata per utente {username}", username);
+            _runtime.Logger.LogDebug("Login fallito: credenziali non valide");
             return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 
@@ -122,7 +122,7 @@ internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : c
         await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, rateLimitKey);
 
         _runtime.Logger.LogInformation("Login riuscito");
-        _runtime.Logger.LogDebug("Login riuscito per utente {username}", username);
+        _runtime.Logger.LogDebug("Login riuscito");
 
         return Result.Ok(new RefreshTokenDto
         {

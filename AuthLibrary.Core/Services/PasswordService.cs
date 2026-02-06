@@ -29,7 +29,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
             RateLimitRequestType.ResetPassword,
             normalizedEmail,
-            "Se l'email è registrata, ti abbiamo inviato un link per il reset.");
+            "Se l'email e registrata, ti abbiamo inviato un link per il reset.");
         if (blockedResult.IsFailure)
         {
             _runtime.Logger.LogWarning("RecoveryPassword bloccato (rate limit)");
@@ -40,7 +40,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(
             RateLimitRequestType.ResetPassword,
             normalizedEmail,
-            "Se l'email è registrata, ti abbiamo inviato un link per il reset.");
+            "Se l'email e registrata, ti abbiamo inviato un link per il reset.");
         if (cooldownResult.IsFailure)
         {
             _runtime.Logger.LogWarning("RecoveryPassword in cooldown");
@@ -54,18 +54,21 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.ResetPassword, normalizedEmail);
             _runtime.Logger.LogInformation("RecoveryPassword richiesto per email non esistente");
             _runtime.Logger.LogDebug("RecoveryPassword richiesto per email non esistente {email}", email);
-            return Result.Ok("Se l'email è registrata, ti abbiamo inviato un link per il reset.");
+            return Result.Ok("Se l'email e registrata, ti abbiamo inviato un link per il reset.");
         }
 
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
-        await _runtime.Repository.RemovePasswordResetTokensByUserIdAsync(existingEntry.Id);
-        await _runtime.Repository.AddPasswordResetTokenAsync(new PasswordResetToken
+        await ExecuteInTransaction(async () =>
         {
-            UserId = existingEntry.Id,
-            TokenHash = tokenHash,
-            ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+            await _runtime.Repository.RemovePasswordResetTokensByUserIdAsync(existingEntry.Id);
+            await _runtime.Repository.AddPasswordResetTokenAsync(new PasswordResetToken
+            {
+                UserId = existingEntry.Id,
+                TokenHash = tokenHash,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+            });
+            await _runtime.Repository.SaveChangesAsync();
         });
-        await _runtime.Repository.SaveChangesAsync();
 
         var emailResult = await _emailVerificationService.SendAuthEmail(
             RateLimitRequestType.ResetPassword,
@@ -80,7 +83,7 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
             return Result.Fail<string>(emailResult.Error);
         }
 
-        return Result.Ok("Se l'email è registrata, ti abbiamo inviato un link per il reset.");
+        return Result.Ok("Se l'email e registrata, ti abbiamo inviato un link per il reset.");
     }
 
     public async Task<Result<bool>> ResetPasswordRedirect(string token)
@@ -95,8 +98,11 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         if (entry.ExpiresAt < DateTime.UtcNow)
         {
             _runtime.Logger.LogWarning("ResetPassword: token scaduto");
-            await _runtime.Repository.RemovePasswordResetTokenAsync(entry);
-            await _runtime.Repository.SaveChangesAsync();
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemovePasswordResetTokenAsync(entry);
+                await _runtime.Repository.SaveChangesAsync();
+            });
             return Result.Ok(false);
         }
 
@@ -128,8 +134,11 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         }
         if (entry.ExpiresAt < DateTime.UtcNow)
         {
-            await _runtime.Repository.RemovePasswordResetTokenAsync(entry);
-            await _runtime.Repository.SaveChangesAsync();
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemovePasswordResetTokenAsync(entry);
+                await _runtime.Repository.SaveChangesAsync();
+            });
             return Result.Ok(false);
         }
 
@@ -145,11 +154,24 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         user.Salt = Convert.ToBase64String(salt);
         user.PasswordUpdatedAt = DateTime.UtcNow;
 
-        await _runtime.Repository.RemovePasswordResetTokensByUserIdAsync(user.Id);
-        await _runtime.Repository.UpdateUserAsync(user);
-        await _runtime.Repository.SaveChangesAsync();
+        await ExecuteInTransaction(async () =>
+        {
+            await _runtime.Repository.RemovePasswordResetTokensByUserIdAsync(user.Id);
+            await _runtime.Repository.UpdateUserAsync(user);
+            await _runtime.Repository.SaveChangesAsync();
+        });
 
         _runtime.Logger.LogInformation("Password resettata per utente id {id}", user.Id);
         return Result.Ok(true);
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_runtime.Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        return operation();
     }
 }

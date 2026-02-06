@@ -93,15 +93,20 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
             try
             {
                 user = CreateUserFromExternal(externalUser, email);
-                await _runtime.Repository.AddUserAsync(user);
-                await _runtime.Repository.AddExternalLoginAsync(new ExternalAuthLogin
+                var login = new ExternalAuthLogin
                 {
                     Provider = provider,
                     Subject = externalUser.Subject,
                     UserId = user.Id,
                     CreatedAt = DateTime.UtcNow
+                };
+
+                await ExecuteInTransaction(async () =>
+                {
+                    await _runtime.Repository.AddUserAsync(user);
+                    await _runtime.Repository.AddExternalLoginAsync(login);
+                    await _runtime.Repository.SaveChangesAsync();
                 });
-                await _runtime.Repository.SaveChangesAsync();
             }
             catch (Exception ex)
             {
@@ -113,8 +118,11 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
         if (!user.EmailVerified)
         {
             user.EmailVerified = true;
-            await _runtime.Repository.UpdateUserAsync(user);
-            await _runtime.Repository.SaveChangesAsync();
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.UpdateUserAsync(user);
+                await _runtime.Repository.SaveChangesAsync();
+            });
         }
 
         var accessToken = _runtime.TokenService.GenerateAccessToken(user);
@@ -150,6 +158,16 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
 
         // Keep a minimum floor to avoid edge cases with clock skew.
         return ttl < TimeSpan.FromMinutes(1) ? TimeSpan.FromMinutes(1) : ttl;
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_runtime.Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        return operation();
     }
 
     private TUser CreateUserFromExternal(ExternalUserInfo externalUser, string normalizedEmail)

@@ -199,8 +199,11 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
         if (existingEntry.ReplacedByToken != null)
         {
-             await _repository.RemoveRefreshTokensByUserIdAsync(existingEntry.UserId);
-             await _repository.SaveChangesAsync();
+             await ExecuteInTransaction(async () =>
+             {
+                 await _repository.RemoveRefreshTokensByUserIdAsync(existingEntry.UserId);
+                 await _repository.SaveChangesAsync();
+             });
             _logger.LogWarning("refresh token reuse rilevato: sessione invalidata");
             throw new InvalidOperationException("token non valido");
         }
@@ -258,5 +261,15 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             PlainToken = newToken,
             ExpiresAt = newExpiresAt
         };
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        return operation();
     }
 }

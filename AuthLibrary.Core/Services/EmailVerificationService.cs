@@ -60,14 +60,19 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         }
 
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
-        await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(user.Id);
-        await _runtime.Repository.AddEmailVerifiedTokenAsync(new EmailVerifiedToken
+        var token = new EmailVerifiedToken
         {
             UserId = user.Id,
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        await ExecuteInTransaction(async () =>
+        {
+            await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(user.Id);
+            await _runtime.Repository.AddEmailVerifiedTokenAsync(token);
+            await _runtime.Repository.SaveChangesAsync();
         });
-        await _runtime.Repository.SaveChangesAsync();
 
         var emailResult = await SendAuthEmail(
             RateLimitRequestType.VerifyEmail,
@@ -100,20 +105,26 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         if (entry.ExpiresAt < DateTime.UtcNow)
         {
             _runtime.Logger.LogWarning("VerifyMail: token scaduto, cleanup");
-            await _runtime.Repository.RemoveEmailVerifiedTokenAsync(entry);
-            await _runtime.Repository.SaveChangesAsync();
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveEmailVerifiedTokenAsync(entry);
+                await _runtime.Repository.SaveChangesAsync();
+            });
             return Result.Ok(false);
         }
 
         var user = await _runtime.Repository.GetUserByIdAsync(entry.UserId);
-        if (user != null)
+        await ExecuteInTransaction(async () =>
         {
-            user.EmailVerified = true;
-            await _runtime.Repository.UpdateUserAsync(user);
-        }
+            if (user != null)
+            {
+                user.EmailVerified = true;
+                await _runtime.Repository.UpdateUserAsync(user);
+            }
 
-        await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
-        await _runtime.Repository.SaveChangesAsync();
+            await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
+            await _runtime.Repository.SaveChangesAsync();
+        });
 
         _runtime.Logger.LogInformation("Email verificata con successo");
         _runtime.Logger.LogDebug("Email verificata con successo per utente {email}", user?.Email);
@@ -175,5 +186,15 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         _runtime.Logger.LogDebug("Email {type} inviata a {email}", type, email);
         await _runtime.RateLimitService.StartCooldown(type, email, TimeSpan.FromSeconds(60));
         return Result.Ok();
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_runtime.Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        return operation();
     }
 }

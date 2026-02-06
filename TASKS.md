@@ -110,7 +110,7 @@
 - Action:
   - Introduce explicit unit-of-work/transaction boundaries for critical flows.
 - Benefit: Stronger consistency and safer rollback behavior.
-- Status: TODO
+- Status: DONE
 - Commit message: `REF-002: add explicit transaction boundaries to critical auth flows`
 
 ### REF-003

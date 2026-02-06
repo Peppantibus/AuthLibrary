@@ -508,7 +508,7 @@ public class AuthServiceBasicTests
         result.IsSuccess.Should().BeTrue(result.Error);
         _repositoryMock.Verify(x => x.AddUserAsync(user), Times.Once);
         _repositoryMock.Verify(x => x.AddEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()), Times.Once);
-        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Exactly(2));
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
         _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Once);
         _rateLimitServiceMock.Verify(x => x.RegisterAttempted(RateLimitRequestType.Register, user.Email), Times.Once);
     }
@@ -642,7 +642,7 @@ public class AuthServiceBasicTests
         result.IsSuccess.Should().BeFalse();
         _repositoryMock.Verify(x => x.RemoveUserAsync(user), Times.Once);
         _repositoryMock.Verify(x => x.RemoveEmailVerifiedTokenAsync(It.IsAny<EmailVerifiedToken>()), Times.Once);
-        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Exactly(3));
+        _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Exactly(2));
     }
 
     #endregion

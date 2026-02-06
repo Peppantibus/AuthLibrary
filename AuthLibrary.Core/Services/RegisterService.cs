@@ -68,9 +68,6 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         user.Salt = Convert.ToBase64String(salt);
         user.EmailVerified = false;
 
-        await _runtime.Repository.AddUserAsync(user);
-        await _runtime.Repository.SaveChangesAsync();
-
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
         var emailVerified = new EmailVerifiedToken
         {
@@ -78,8 +75,13 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddMinutes(30)
         };
-        await _runtime.Repository.AddEmailVerifiedTokenAsync(emailVerified);
-        await _runtime.Repository.SaveChangesAsync();
+
+        await ExecuteInTransaction(async () =>
+        {
+            await _runtime.Repository.AddUserAsync(user);
+            await _runtime.Repository.AddEmailVerifiedTokenAsync(emailVerified);
+            await _runtime.Repository.SaveChangesAsync();
+        });
 
         Result emailResult;
         try
@@ -96,21 +98,34 @@ internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUs
         catch (Exception ex)
         {
             _runtime.Logger.LogError(ex, "Invio email di verifica fallito per {email}", user.Email);
-            emailResult = Result.Fail("Impossibile inviare email di verifica. Riprova più tardi.");
+            emailResult = Result.Fail("Impossibile inviare email di verifica. Riprova piu tardi.");
         }
 
         if (emailResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Invio email fallito, rollback registrazione");
             _runtime.Logger.LogDebug("Invio email fallito per {email}, rollback registrazione", user.Email);
-            await _runtime.Repository.RemoveUserAsync(user);
-            await _runtime.Repository.RemoveEmailVerifiedTokenAsync(emailVerified);
-            await _runtime.Repository.SaveChangesAsync();
-            return Result.Fail("Impossibile inviare email di verifica. Riprova più tardi.");
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveUserAsync(user);
+                await _runtime.Repository.RemoveEmailVerifiedTokenAsync(emailVerified);
+                await _runtime.Repository.SaveChangesAsync();
+            });
+            return Result.Fail("Impossibile inviare email di verifica. Riprova piu tardi.");
         }
 
         _runtime.Logger.LogInformation("Registrazione completata");
         _runtime.Logger.LogDebug("Registrazione completata per utente {email}", user.Email);
         return Result.Ok();
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_runtime.Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        return operation();
     }
 }

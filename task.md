@@ -31,7 +31,7 @@
   - Keep uniform external response semantics across all resend outcomes.
   - Apply consistent transition behavior and avoid distinguishable failure outputs.
   - Move details to logs/telemetry only.
-- Status: TODO
+- Status: DONE
 - Commit message: `enforce uniform resend behavior under internal failures`
 
 ### SEC-003

@@ -75,7 +75,9 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
             "/verify-email?token=");
         if (emailResult.IsFailure)
         {
-            return Result.Fail(emailResult.Error, emailResult.ErrorCode);
+            _runtime.Logger.LogWarning("Resend interno fallito per {email} con code {code}", email, emailResult.ErrorCode);
+            _runtime.Logger.LogDebug("Resend interno fallito per {email}: {error}", email, emailResult.Error);
+            return Result.Ok(genericResponse);
         }
 
         _runtime.Logger.LogInformation("Email di verifica reinviata");

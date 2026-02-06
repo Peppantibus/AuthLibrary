@@ -946,7 +946,7 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
-    public async Task ResendVerificationEmail_WhenMailSendThrows_ReturnsTypedFailure()
+    public async Task ResendVerificationEmail_WhenMailSendThrows_ReturnsGenericSuccess()
     {
         // Arrange
         var user = TestDataBuilder.User()
@@ -982,8 +982,8 @@ public class AuthServiceBasicTests
         var result = await _authService.ResendVerificationEmail(user.Email);
 
         // Assert
-        result.IsSuccess.Should().BeFalse();
-        result.ErrorCode.Should().Be(AuthErrorCode.RecoveryError.ToString());
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().Contain("Se l'email e registrata");
     }
 
     [Fact]

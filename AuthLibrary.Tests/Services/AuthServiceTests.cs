@@ -506,6 +506,79 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task ExternalLoginWithGoogle_OverridesFactoryIdentityFieldsWithValidatedClaims()
+    {
+        // Arrange
+        var idToken = "google-id-token";
+        var externalUser = new ExternalUserInfo
+        {
+            Subject = "google-subject-identity-override",
+            Email = "trusted@example.com",
+            EmailVerified = true,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10)
+        };
+
+        _externalTokenValidatorMock
+            .Setup(x => x.ValidateGoogleIdToken(idToken, It.IsAny<string?>()))
+            .ReturnsAsync(externalUser);
+
+        _rateLimitServiceMock
+            .Setup(x => x.TryStartCooldown(RateLimitRequestType.ExternalLogin, It.IsAny<string>(), It.IsAny<TimeSpan>()))
+            .ReturnsAsync(true);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.ExternalLogin, "trusted@example.com"))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.ExternalLogin, "trusted@example.com"))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.Reset(RateLimitRequestType.ExternalLogin, "trusted@example.com"))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetExternalLoginAsync("google", "google-subject-identity-override"))
+            .ReturnsAsync((ExternalAuthLogin?)null);
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync("trusted@example.com"))
+            .ReturnsAsync((TestUser?)null);
+
+        _externalUserFactoryMock.Setup(x => x.CreateFromExternal(It.IsAny<ExternalUserInfo>()))
+            .Returns(TestDataBuilder.User()
+                .WithId("attacker-controlled-id")
+                .WithEmail("attacker@example.com")
+                .WithUsername("attacker-user")
+                .Build());
+
+        TestUser? createdUser = null;
+        _repositoryMock.Setup(x => x.AddUserAsync(It.IsAny<TestUser>()))
+            .Callback<TestUser>(u => createdUser = u)
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.AddExternalLoginAsync(It.IsAny<ExternalAuthLogin>()))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        _tokenServiceMock.Setup(x => x.GenerateAccessToken(It.IsAny<TestUser>()))
+            .Returns(new AccessTokenResult { Token = "jwt-token", ExpiresInSeconds = 900 });
+        _tokenServiceMock.Setup(x => x.CreateRefreshToken(It.IsAny<TestUser>()))
+            .ReturnsAsync(new RefreshTokenIssueResult
+            {
+                PlainToken = "refresh-token",
+                ExpiresAt = DateTime.UtcNow.AddDays(7),
+                UserId = "generated-id"
+            });
+
+        // Act
+        var result = await _authService.ExternalLoginWithGoogle(idToken);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        createdUser.Should().NotBeNull();
+        createdUser!.Id.Should().NotBe("attacker-controlled-id");
+        createdUser.Email.Should().Be("trusted@example.com");
+        createdUser.Username.Should().Be("trusted@example.com");
+        _repositoryMock.Verify(x => x.AddExternalLoginAsync(It.Is<ExternalAuthLogin>(l =>
+            l.UserId == createdUser.Id &&
+            l.Provider == "google" &&
+            l.Subject == "google-subject-identity-override")), Times.Once);
+    }
+
+    [Fact]
     public async Task ExternalLoginWithGoogle_WithUnverifiedEmail_ReturnsFailure()
     {
         // Arrange

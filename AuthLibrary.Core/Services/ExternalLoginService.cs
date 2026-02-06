@@ -182,18 +182,10 @@ internal sealed class ExternalLoginService<TUser> : IExternalLoginService<TUser>
 
         var user = _runtime.ExternalUserFactory.CreateFromExternal(externalUser);
 
-        if (string.IsNullOrWhiteSpace(user.Id))
-        {
-            user.Id = Guid.NewGuid().ToString();
-        }
-        if (string.IsNullOrWhiteSpace(user.Email))
-        {
-            user.Email = normalizedEmail;
-        }
-        if (string.IsNullOrWhiteSpace(user.Username))
-        {
-            user.Username = normalizedEmail;
-        }
+        // Keep identity fields server-owned and bound to validated external claims.
+        user.Id = Guid.NewGuid().ToString();
+        user.Email = normalizedEmail;
+        user.Username = normalizedEmail;
         if (string.IsNullOrWhiteSpace(user.Name))
         {
             user.Name = externalUser.GivenName ?? externalUser.Name ?? string.Empty;

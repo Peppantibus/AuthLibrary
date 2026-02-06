@@ -2,6 +2,7 @@ using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
 using AuthLibrary.Models.Dto;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
@@ -22,6 +23,11 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         const string genericResponse = "Se l'email e registrata e non ancora verificata, ti abbiamo inviato un link di verifica.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
+        var emailValidation = InputValidators.ValidateEmail(normalizedEmail);
+        if (emailValidation.IsFailure)
+        {
+            return Result.Ok(genericResponse);
+        }
 
         var gateResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldown(
             RateLimitRequestType.VerifyEmail,

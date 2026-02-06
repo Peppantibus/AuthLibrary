@@ -1023,6 +1023,24 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task ResendVerificationEmail_WithInvalidEmail_ReturnsGenericSuccessWithoutRateLimit()
+    {
+        // Arrange
+        var invalidEmail = "not-an-email";
+
+        // Act
+        var result = await _authService.ResendVerificationEmail(invalidEmail);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Should().BeOfType<Result<string>>();
+        ((Result<string>)result).Value.Should().Contain("Se l'email e registrata");
+        _rateLimitServiceMock.Verify(x => x.IsBlocked(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _rateLimitServiceMock.Verify(x => x.IsInCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ResendVerificationEmail_WhenMailSendThrows_ReturnsGenericSuccess()
     {
         // Arrange
@@ -1227,6 +1245,23 @@ public class AuthServiceBasicTests
         // Assert
         result.IsSuccess.Should().BeTrue(result.Error);
         result.Value.Should().Contain("Se l'email e registrata");
+    }
+
+    [Fact]
+    public async Task RecoveryPassword_WithInvalidEmail_ReturnsGenericSuccessWithoutRateLimit()
+    {
+        // Arrange
+        var invalidEmail = "not-an-email";
+
+        // Act
+        var result = await _authService.RecoveryPassword(invalidEmail);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().Contain("Se l'email e registrata");
+        _rateLimitServiceMock.Verify(x => x.IsBlocked(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _rateLimitServiceMock.Verify(x => x.IsInCooldown(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(It.IsAny<RateLimitRequestType>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

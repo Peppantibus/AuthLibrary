@@ -26,6 +26,11 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
         const string genericResponse = "Se l'email e registrata, ti abbiamo inviato un link per il reset.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
+        var emailValidation = InputValidators.ValidateEmail(normalizedEmail);
+        if (emailValidation.IsFailure)
+        {
+            return Result.Ok(genericResponse);
+        }
 
         var gateResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldown(
             RateLimitRequestType.ResetPassword,

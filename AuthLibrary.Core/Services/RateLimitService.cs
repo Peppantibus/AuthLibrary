@@ -8,6 +8,7 @@ namespace AuthLibrary.Services;
 
 public class RateLimitService : IRateLimitService
 {
+    private const int MaxIdentifierLength = 256;
     private readonly IRedisService _redisService;
     private readonly IHttpContextAccessor _contextAccessor;
     private readonly Dictionary<RateLimitRequestType, RateLimitConfiguration> _config;
@@ -31,11 +32,12 @@ public class RateLimitService : IRateLimitService
     /// </summary>
     private string GetClientIP(string identifier)
     {
+        var safeIdentifier = NormalizeIdentifier(identifier);
         var context = _contextAccessor.HttpContext;
         if (context == null)
         {
             // No HttpContext (background/non-HTTP usage); scope to identifier to avoid global lockouts.
-            return $"unknown-ip:{identifier}";
+            return $"unknown-ip:{safeIdentifier}";
         }
 
         var remoteIp = NormalizeIp(context.Connection.RemoteIpAddress?.ToString());
@@ -104,10 +106,24 @@ public class RateLimitService : IRateLimitService
             : null;
     }
 
+    private static string NormalizeIdentifier(string? identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return string.Empty;
+        }
+
+        var normalized = identifier.Trim();
+        return normalized.Length <= MaxIdentifierLength
+            ? normalized
+            : normalized[..MaxIdentifierLength];
+    }
+
     public async Task<bool> IsBlocked(RateLimitRequestType type, string identifier)
     {
-        var ip = GetClientIP(identifier);
-        var hasIdentifier = !string.IsNullOrWhiteSpace(identifier);
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        var ip = GetClientIP(normalizedIdentifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
         string ipLockKey = $"rl:lock:{type}:ip:{ip}";
         var ipBlocked = await _redisService.GetValue(ipLockKey) != null;
@@ -116,7 +132,7 @@ public class RateLimitService : IRateLimitService
             return ipBlocked;
         }
 
-        string userLockKey = $"rl:lock:{type}:{identifier}";
+        string userLockKey = $"rl:lock:{type}:{normalizedIdentifier}";
         var userBlocked = await _redisService.GetValue(userLockKey) != null;
 
         return ipBlocked || userBlocked;
@@ -130,8 +146,9 @@ public class RateLimitService : IRateLimitService
             throw new InvalidOperationException("enum non registrato");
         }
 
-        var ip = GetClientIP(idenfier);
-        var hasIdentifier = !string.IsNullOrWhiteSpace(idenfier);
+        var normalizedIdentifier = NormalizeIdentifier(idenfier);
+        var ip = GetClientIP(normalizedIdentifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
         string ipAttemptKey = $"rl:attempt:{type}:ip:{ip}";
         var ipAttempts = await _redisService.Increment(ipAttemptKey, 1);
@@ -144,7 +161,7 @@ public class RateLimitService : IRateLimitService
 
         if (hasIdentifier)
         {
-            string identifierAttemptKey = $"rl:attempt:{type}:{idenfier}";
+            string identifierAttemptKey = $"rl:attempt:{type}:{normalizedIdentifier}";
             identifierAttempts = await _redisService.Increment(identifierAttemptKey, 1);
 
             if (identifierAttempts == 1)
@@ -161,7 +178,7 @@ public class RateLimitService : IRateLimitService
 
         if (hasIdentifier && identifierAttempts > configuration.MaxUserAttempts)
         {
-            await _redisService.SetValue($"rl:lock:{type}:{idenfier}", "1", configuration.LockDuration);
+            await _redisService.SetValue($"rl:lock:{type}:{normalizedIdentifier}", "1", configuration.LockDuration);
             return true;
         }
 
@@ -170,38 +187,43 @@ public class RateLimitService : IRateLimitService
 
     public async Task Reset(RateLimitRequestType type, string identifier)
     {
-        var ip = GetClientIP(identifier);
-        var hasIdentifier = !string.IsNullOrWhiteSpace(identifier);
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        var ip = GetClientIP(normalizedIdentifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
         await _redisService.Remove($"rl:attempt:{type}:ip:{ip}");
 
         if (hasIdentifier)
         {
-            await _redisService.Remove($"rl:attempt:{type}:{identifier}");
+            await _redisService.Remove($"rl:attempt:{type}:{normalizedIdentifier}");
         }
     }
 
     public async Task<bool> IsInCooldown(RateLimitRequestType type, string identifier)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         return await _redisService.GetValue(key) != null;
     }
 
     public async Task StartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         await _redisService.SetValue(key, "1", duration);
     }
 
     public async Task<bool> TryStartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         return await _redisService.TrySetValue(key, "1", duration);
     }
 
     public async Task ClearCooldown(RateLimitRequestType type, string identifier)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         await _redisService.Remove(key);
     }
 

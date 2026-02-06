@@ -44,7 +44,7 @@
   - Validate email format and length before rate-limit operations.
   - Add a defensive max-length cap for generic identifiers in rate-limit key composition.
   - Preserve enumeration-safe generic responses for invalid or unknown emails.
-- Status: TODO
+- Status: DONE
 - Commit message: `validate and bound rate-limit identifiers for email flows`
 
 ### SEC-004

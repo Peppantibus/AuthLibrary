@@ -105,14 +105,22 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         }
 
         var user = await _runtime.Repository.GetUserByIdAsync(entry.UserId);
+        if (user == null)
+        {
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
+                await _runtime.Repository.SaveChangesAsync();
+            });
+
+            _runtime.Logger.LogWarning("VerifyMail: token valido ma utente non trovato");
+            return Result.Ok(false);
+        }
+
         await ExecuteInTransaction(async () =>
         {
-            if (user != null)
-            {
-                user.EmailVerified = true;
-                await _runtime.Repository.UpdateUserAsync(user);
-            }
-
+            user.EmailVerified = true;
+            await _runtime.Repository.UpdateUserAsync(user);
             await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
             await _runtime.Repository.SaveChangesAsync();
         });

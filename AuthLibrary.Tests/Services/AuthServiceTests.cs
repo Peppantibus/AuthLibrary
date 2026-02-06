@@ -918,6 +918,38 @@ public class AuthServiceBasicTests
         _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Once);
     }
 
+    [Fact]
+    public async Task VerifyMail_WhenUserMissing_InvalidatesTokenAndReturnsFalse()
+    {
+        // Arrange
+        var token = "verify-token-user-missing";
+        var tokenHash = HashToken(token);
+        var entry = new EmailVerifiedToken
+        {
+            UserId = "missing-user",
+            TokenHash = tokenHash,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        _repositoryMock.Setup(x => x.GetEmailVerifiedTokenAsync(tokenHash))
+            .ReturnsAsync(entry);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(entry.UserId))
+            .ReturnsAsync((TestUser?)null);
+        _repositoryMock.Setup(x => x.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId))
+            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.SaveChangesAsync())
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _authService.VerifyMail(token);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        result.Value.Should().BeFalse();
+        _repositoryMock.Verify(x => x.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId), Times.Once);
+        _repositoryMock.Verify(x => x.UpdateUserAsync(It.IsAny<TestUser>()), Times.Never);
+    }
+
     #endregion
 
     #region Password Recovery Tests

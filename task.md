@@ -77,7 +77,7 @@
 - Remediation:
   - If `user == null`, invalidate token and return `Result.Ok(false)` or typed `InvalidUser`.
   - Add dedicated regression test coverage.
-- Status: TODO
+- Status: DONE
 - Commit message: `fix verifymail behavior for missing user and add tests`
 
 ### REF-002

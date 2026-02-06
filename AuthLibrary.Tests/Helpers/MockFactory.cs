@@ -19,7 +19,11 @@ public static class MockFactory
 
     public static Mock<IAuthRepository<TUser>> CreateAuthRepository<TUser>() where TUser : class, IAuthUser
     {
-        return new Mock<IAuthRepository<TUser>>();
+        var mock = new Mock<IAuthRepository<TUser>>();
+        mock.As<ITransactionalAuthRepository<TUser>>()
+            .Setup(x => x.ExecuteInTransactionAsync(It.IsAny<Func<Task>>()))
+            .Returns((Func<Task> operation) => operation());
+        return mock;
     }
 
     public static Mock<IRedisService> CreateRedisService()
@@ -51,7 +55,8 @@ public static class MockFactory
     {
         return new SecuritySettings
         {
-            Pepper = "test-pepper-secret-key-for-testing-purposes-only"
+            Pepper = "test-pepper-secret-key-for-testing-purposes-only",
+            RequireTransactionalRepository = true
         };
     }
 

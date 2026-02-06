@@ -11,6 +11,7 @@ public class TokenServiceTests
     private readonly Mock<IAuthRepository<TestUser>> _repositoryMock;
     private readonly Mock<ILogger<TokenService<TestUser>>> _loggerMock;
     private readonly Mock<IRateLimitService> _rateLimitServiceMock;
+    private readonly IOptions<SecuritySettings> _securitySettings;
     private readonly IOptions<JwtSettings> _jwtSettings;
     private readonly IOptions<RefreshTokenSettings> _refreshTokenSettings;
     private readonly TokenService<TestUser> _tokenService;
@@ -20,6 +21,7 @@ public class TokenServiceTests
         _repositoryMock = MockFactory.CreateAuthRepository<TestUser>();
         _loggerMock = MockFactory.CreateLogger<TokenService<TestUser>>();
         _rateLimitServiceMock = MockFactory.CreateRateLimitService();
+        _securitySettings = MockFactory.CreateOptions(MockFactory.CreateSecuritySettings());
         
         var jwtConfig = MockFactory.CreateJwtSettings();
         _jwtSettings = MockFactory.CreateOptions(jwtConfig);
@@ -35,7 +37,8 @@ public class TokenServiceTests
             _loggerMock.Object,
             _repositoryMock.Object,
             _refreshTokenSettings,
-            _rateLimitServiceMock.Object);
+            _rateLimitServiceMock.Object,
+            _securitySettings);
     }
 
     [Fact]
@@ -47,7 +50,8 @@ public class TokenServiceTests
             _loggerMock.Object,
             _repositoryMock.Object,
             _refreshTokenSettings,
-            _rateLimitServiceMock.Object);
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         service.Should().NotBeNull();
     }
 
@@ -70,7 +74,8 @@ public class TokenServiceTests
             _loggerMock.Object,
             _repositoryMock.Object,
             _refreshTokenSettings,
-            _rateLimitServiceMock.Object);
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*must be at least 32 bytes*");
     }
@@ -94,9 +99,30 @@ public class TokenServiceTests
             _loggerMock.Object,
             _repositoryMock.Object,
             _refreshTokenSettings,
-            _rateLimitServiceMock.Object);
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*JWT Key is not configured*");
+    }
+
+    [Fact]
+    public void Constructor_WithRequiredTransactionsAndNonTransactionalRepository_Throws()
+    {
+        // Arrange
+        var nonTransactionalRepo = new Mock<IAuthRepository<TestUser>>();
+
+        // Act
+        var act = () => new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            nonTransactionalRepo.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ITransactionalAuthRepository*");
     }
 
     [Fact]

@@ -78,6 +78,7 @@ public static class ServiceCollectionExtensions
                 tokenService,
                 rateLimitService,
                 templateService,
+                securitySettings.RequireTransactionalRepository,
                 authSettings,
                 mailSettings,
                 logger,

@@ -55,6 +55,37 @@ public class AuthServiceBasicTests
         );
     }
 
+    [Fact]
+    public void Constructor_WithRequiredTransactionsAndNonTransactionalRepository_Throws()
+    {
+        // Arrange
+        var nonTransactionalRepository = new Mock<IAuthRepository<TestUser>>();
+        var securitySettings = MockFactory.CreateOptions(new SecuritySettings
+        {
+            Pepper = _securitySettings.Value.Pepper,
+            RequireTransactionalRepository = true
+        });
+
+        // Act
+        var act = () => new AuthService<TestUser>(
+            nonTransactionalRepository.Object,
+            securitySettings,
+            _mailServiceMock.Object,
+            _tokenServiceMock.Object,
+            _rateLimitServiceMock.Object,
+            _templateServiceMock.Object,
+            _authSettings,
+            _mailSettings,
+            _loggerMock.Object,
+            _passwordValidatorMock.Object,
+            _externalTokenValidatorMock.Object,
+            _externalUserFactoryMock.Object);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ITransactionalAuthRepository*");
+    }
+
     #region Login Tests
 
     [Fact]

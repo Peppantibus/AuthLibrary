@@ -184,11 +184,6 @@ internal sealed class PasswordService<TUser> : IPasswordFlowService<TUser> where
 
     private Task ExecuteInTransaction(Func<Task> operation)
     {
-        if (_runtime.Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
-        {
-            return transactionalRepository.ExecuteInTransactionAsync(operation);
-        }
-
-        return operation();
+        return _runtime.ExecuteInTransactionAsync(operation);
     }
 }

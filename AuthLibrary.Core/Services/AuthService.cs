@@ -58,6 +58,7 @@ public class AuthService<TUser> : IAuthService<TUser> where TUser : class, IAuth
             tokenService,
             rateLimitService,
             templateService,
+            securitySettings.Value.RequireTransactionalRepository,
             authSettings.Value,
             mailSettings.Value,
             logger,

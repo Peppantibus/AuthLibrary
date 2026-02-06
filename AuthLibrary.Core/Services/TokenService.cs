@@ -20,6 +20,7 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     private readonly ILogger<TokenService<TUser>> _logger;
     private readonly IAuthRepository<TUser> _repository;
     private readonly IRateLimitService _rateLimitService;
+    private readonly bool _requireTransactionalRepository;
     private readonly RefreshTokenSettings _refreshTokenSettings;
 
     public TokenService(
@@ -27,16 +28,19 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         ILogger<TokenService<TUser>> logger,
         IAuthRepository<TUser> repository,
         IOptions<RefreshTokenSettings> refreshTokenSettings,
-        IRateLimitService rateLimitService)
+        IRateLimitService rateLimitService,
+        IOptions<SecuritySettings> securitySettings)
     {
         _jwt = jwtSettings.Value;
         _logger = logger;
         _repository = repository;
         _refreshTokenSettings = refreshTokenSettings.Value;
         _rateLimitService = rateLimitService;
+        _requireTransactionalRepository = securitySettings.Value.RequireTransactionalRepository;
         
         // SECURITY: Validate JWT key configuration
         ValidateJwtConfiguration();
+        ValidateRepositoryConfiguration();
     }
 
     /// <summary>
@@ -283,6 +287,11 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
             return transactionalRepository.ExecuteInTransactionAsync(operation);
         }
 
+        if (_requireTransactionalRepository)
+        {
+            throw new InvalidOperationException("Registrare ITransactionalAuthRepository<TUser> per garantire operazioni atomiche.");
+        }
+
         return operation();
     }
 
@@ -297,6 +306,14 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         if (await _rateLimitService.RegisterAttempted(RateLimitRequestType.RefreshToken, ipScopeKey))
         {
             throw new InvalidOperationException("token non valido");
+        }
+    }
+
+    private void ValidateRepositoryConfiguration()
+    {
+        if (_requireTransactionalRepository && _repository is not ITransactionalAuthRepository<TUser>)
+        {
+            throw new InvalidOperationException("Registrare ITransactionalAuthRepository<TUser> per garantire operazioni atomiche.");
         }
     }
 }

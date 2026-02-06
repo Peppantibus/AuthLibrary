@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
-  <config>
-    <add key="signatureValidationMode" value="accept" />
-  </config>
+  <!--
+    Copy this file to nuget.config for local development.
+    Keep credentials only in local nuget.config (never commit them).
+  -->
   <packageSources>
     <clear />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
   </packageSources>
-  <trustedSigners>
-    <clear />
-  </trustedSigners>
 </configuration>

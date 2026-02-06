@@ -77,5 +77,5 @@
 - Remediation:
   - Introduce safe config strategy (`nuget.config.example` + local override) or enforce credential scanning guard.
   - Document recommended local setup for private feeds.
-- Status: TODO
+- Status: DONE
 - Commit message: `harden nuget configuration workflow against credential leakage`

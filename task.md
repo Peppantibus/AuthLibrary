@@ -53,7 +53,7 @@
 - Remediation:
   - Apply same anti-enumeration transitions for already-verified users.
   - Keep user-facing response semantics uniform across outcomes.
-- Status: TODO
+- Status: DONE
 - Commit message: `normalize resend rate-limit transitions for anti-enumeration`
 
 ### SEC-005

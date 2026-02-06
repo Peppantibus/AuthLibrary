@@ -38,7 +38,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         var user = await _runtime.Repository.GetUserByEmailAsync(normalizedEmail);
         if (user == null)
         {
-            await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.VerifyEmail, normalizedEmail);
+            await ApplyResendTransition(normalizedEmail);
             return Result.Ok(genericResponse);
         }
 
@@ -46,6 +46,7 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         {
             _runtime.Logger.LogInformation("Resend richiesto per email gia verificata");
             _runtime.Logger.LogDebug("Resend richiesto per email gia verificata {email}", email);
+            await ApplyResendTransition(normalizedEmail);
             return Result.Ok(genericResponse);
         }
 
@@ -165,6 +166,12 @@ internal sealed class EmailVerificationService<TUser> : IEmailVerificationServic
         _runtime.Logger.LogDebug("Email {type} inviata a {email}", type, email);
         await _runtime.RateLimitService.StartCooldown(type, email, TimeSpan.FromSeconds(60));
         return Result.Ok();
+    }
+
+    private async Task ApplyResendTransition(string email)
+    {
+        await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.VerifyEmail, email);
+        await _runtime.RateLimitService.StartCooldown(RateLimitRequestType.VerifyEmail, email, TimeSpan.FromSeconds(60));
     }
 
     private Task ExecuteInTransaction(Func<Task> operation)

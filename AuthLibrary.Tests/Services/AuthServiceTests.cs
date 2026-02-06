@@ -764,6 +764,66 @@ public class AuthServiceBasicTests
     }
 
     [Fact]
+    public async Task ResendVerificationEmail_WithVerifiedUser_AppliesUniformRateLimitTransitions()
+    {
+        // Arrange
+        var user = TestDataBuilder.User()
+            .WithEmail("verified@example.com")
+            .WithUsername("verified")
+            .WithEmailVerified(true)
+            .Build();
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, user.Email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, user.Email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(user.Email))
+            .ReturnsAsync(user);
+
+        // Act
+        var result = await _authService.ResendVerificationEmail(user.Email);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, user.Email), Times.Once);
+        _rateLimitServiceMock.Verify(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, user.Email, It.IsAny<TimeSpan>()), Times.Once);
+        _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResendVerificationEmail_WithUnknownUser_AppliesUniformRateLimitTransitions()
+    {
+        // Arrange
+        var email = "unknown@example.com";
+
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.VerifyEmail, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.IsInCooldown(RateLimitRequestType.VerifyEmail, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, email))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, email, It.IsAny<TimeSpan>()))
+            .Returns(Task.CompletedTask);
+
+        _repositoryMock.Setup(x => x.GetUserByEmailAsync(email))
+            .ReturnsAsync((TestUser?)null);
+
+        // Act
+        var result = await _authService.ResendVerificationEmail(email);
+
+        // Assert
+        result.IsSuccess.Should().BeTrue(result.Error);
+        _rateLimitServiceMock.Verify(x => x.RegisterAttempted(RateLimitRequestType.VerifyEmail, email), Times.Once);
+        _rateLimitServiceMock.Verify(x => x.StartCooldown(RateLimitRequestType.VerifyEmail, email, It.IsAny<TimeSpan>()), Times.Once);
+        _mailServiceMock.Verify(x => x.SendAsync(It.IsAny<MailDto>()), Times.Never);
+    }
+
+    [Fact]
     public async Task VerifyMail_WithValidToken_MarksEmailVerified()
     {
         // Arrange

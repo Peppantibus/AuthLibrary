@@ -4,5 +4,5 @@ namespace AuthLibrary.Interfaces;
 
 public interface IExternalTokenValidator
 {
-    Task<ExternalUserInfo> ValidateGoogleIdToken(string idToken);
+    Task<ExternalUserInfo> ValidateGoogleIdToken(string idToken, string? expectedNonce = null);
 }

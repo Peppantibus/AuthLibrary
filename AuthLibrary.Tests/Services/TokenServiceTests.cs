@@ -10,6 +10,8 @@ public class TokenServiceTests
 {
     private readonly Mock<IAuthRepository<TestUser>> _repositoryMock;
     private readonly Mock<ILogger<TokenService<TestUser>>> _loggerMock;
+    private readonly Mock<IRateLimitService> _rateLimitServiceMock;
+    private readonly IOptions<SecuritySettings> _securitySettings;
     private readonly IOptions<JwtSettings> _jwtSettings;
     private readonly IOptions<RefreshTokenSettings> _refreshTokenSettings;
     private readonly TokenService<TestUser> _tokenService;
@@ -18,19 +20,38 @@ public class TokenServiceTests
     {
         _repositoryMock = MockFactory.CreateAuthRepository<TestUser>();
         _loggerMock = MockFactory.CreateLogger<TokenService<TestUser>>();
+        _rateLimitServiceMock = MockFactory.CreateRateLimitService();
+        _securitySettings = MockFactory.CreateOptions(MockFactory.CreateSecuritySettings());
         
         var jwtConfig = MockFactory.CreateJwtSettings();
         _jwtSettings = MockFactory.CreateOptions(jwtConfig);
         _refreshTokenSettings = MockFactory.CreateOptions(MockFactory.CreateRefreshTokenSettings());
 
-        _tokenService = new TokenService<TestUser>(_jwtSettings, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(false);
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(false);
+
+        _tokenService = new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
     }
 
     [Fact]
     public void Constructor_WithValidConfiguration_InitializesSuccessfully()
     {
         // Arrange & Act & Assert - If constructor doesn't throw, validation passed
-        var service = new TokenService<TestUser>(_jwtSettings, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var service = new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         service.Should().NotBeNull();
     }
 
@@ -48,7 +69,13 @@ public class TokenServiceTests
         var options = MockFactory.CreateOptions(invalidSettings);
 
         // Act & Assert
-        var act = () => new TokenService<TestUser>(options, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var act = () => new TokenService<TestUser>(
+            options,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*must be at least 32 bytes*");
     }
@@ -67,9 +94,35 @@ public class TokenServiceTests
         var options = MockFactory.CreateOptions(invalidSettings);
 
         // Act & Assert
-        var act = () => new TokenService<TestUser>(options, _loggerMock.Object, _repositoryMock.Object, _refreshTokenSettings);
+        var act = () => new TokenService<TestUser>(
+            options,
+            _loggerMock.Object,
+            _repositoryMock.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*JWT Key is not configured*");
+    }
+
+    [Fact]
+    public void Constructor_WithRequiredTransactionsAndNonTransactionalRepository_Throws()
+    {
+        // Arrange
+        var nonTransactionalRepo = new Mock<IAuthRepository<TestUser>>();
+
+        // Act
+        var act = () => new TokenService<TestUser>(
+            _jwtSettings,
+            _loggerMock.Object,
+            nonTransactionalRepo.Object,
+            _refreshTokenSettings,
+            _rateLimitServiceMock.Object,
+            _securitySettings);
+
+        // Assert
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ITransactionalAuthRepository*");
     }
 
     [Fact]
@@ -201,7 +254,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "plain-refresh-token";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -226,12 +279,13 @@ public class TokenServiceTests
             .ReturnsAsync(existingToken);
         _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
             .ReturnsAsync(user);
-        _repositoryMock.Setup(x => x.UpdateRefreshTokenAsync(It.IsAny<RefreshToken>()))
-            .Returns(Task.CompletedTask);
-        _repositoryMock.Setup(x => x.AddRefreshTokenAsync(It.IsAny<RefreshToken>()))
-            .Returns(Task.CompletedTask);
-        _repositoryMock.Setup(x => x.SaveChangesAsync())
-            .Returns(Task.CompletedTask);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(true);
 
         // Act
         var result = await _tokenService.RefreshToken(plainToken);
@@ -247,10 +301,104 @@ public class TokenServiceTests
     }
 
     [Fact]
+    public async Task RefreshToken_WithConcurrentRotation_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var userId = "user-123";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
+        var hashedToken = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
+        );
+
+        var user = TestDataBuilder.User()
+            .WithId(userId)
+            .WithUsername("testuser")
+            .Build();
+
+        var existingToken = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = hashedToken,
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            ExpiresAt = DateTime.UtcNow.AddDays(29),
+            RevokedAt = null,
+            ReplacedByToken = null
+        };
+
+        _repositoryMock.Setup(x => x.GetRefreshTokenAsync(It.IsAny<string>()))
+            .ReturnsAsync(existingToken);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken(plainToken);
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
+    }
+
+    [Fact]
+    public async Task TryRefreshToken_WithConcurrentRequests_OnlyOneSucceeds()
+    {
+        // Arrange
+        var userId = "user-123";
+        var plainToken = "plain-refresh-token-0123456789abcdef";
+        var hashedToken = Convert.ToBase64String(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
+        );
+
+        var user = TestDataBuilder.User()
+            .WithId(userId)
+            .WithUsername("testuser")
+            .Build();
+
+        var existingToken = new RefreshToken
+        {
+            UserId = userId,
+            TokenHash = hashedToken,
+            CreatedAt = DateTime.UtcNow.AddDays(-1),
+            ExpiresAt = DateTime.UtcNow.AddDays(29),
+            RevokedAt = null,
+            ReplacedByToken = null
+        };
+
+        var rotateCalls = 0;
+        _repositoryMock.Setup(x => x.GetRefreshTokenAsync(It.IsAny<string>()))
+            .ReturnsAsync(existingToken);
+        _repositoryMock.Setup(x => x.GetUserByIdAsync(userId))
+            .ReturnsAsync(user);
+        _repositoryMock.Setup(x => x.TryRotateRefreshTokenAsync(
+                existingToken.TokenHash,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref rotateCalls) == 1);
+
+        // Act
+        var first = _tokenService.TryRefreshToken(plainToken);
+        var second = _tokenService.TryRefreshToken(plainToken);
+        var results = await Task.WhenAll(first, second);
+
+        // Assert
+        results.Count(x => x.IsSuccess).Should().Be(1);
+        results.Count(x => x.IsFailure).Should().Be(1);
+        results.Single(x => x.IsFailure).Error.Should().Contain("token non valido");
+    }
+
+    [Fact]
     public async Task RefreshToken_WithExpiredToken_ThrowsInvalidOperationException()
     {
         // Arrange
-        var plainToken = "expired-token";
+        var plainToken = "expired-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -278,7 +426,7 @@ public class TokenServiceTests
     public async Task RefreshToken_WithRevokedToken_ThrowsInvalidOperationException()
     {
         // Arrange
-        var plainToken = "revoked-token";
+        var plainToken = "revoked-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -310,16 +458,48 @@ public class TokenServiceTests
             .ReturnsAsync((RefreshToken?)null);
 
         // Act & Assert
-        var act = async () => await _tokenService.RefreshToken("non-existent-token");
+        var act = async () => await _tokenService.RefreshToken("non-existent-token-0123456789abcdef");
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*non valido*");
+    }
+
+    [Fact]
+    public async Task RefreshToken_WhenIpIsRateLimited_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _rateLimitServiceMock.Setup(x => x.IsBlocked(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken("plain-refresh-token-0123456789abcdef");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
+        _repositoryMock.Verify(x => x.GetRefreshTokenAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshToken_WhenRefreshAttemptLimitReached_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        _rateLimitServiceMock.Setup(x => x.RegisterAttempted(RateLimitRequestType.RefreshToken, string.Empty))
+            .ReturnsAsync(true);
+
+        // Act
+        var act = async () => await _tokenService.RefreshToken("plain-refresh-token-0123456789abcdef");
+
+        // Assert
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*non valido*");
+        _repositoryMock.Verify(x => x.GetRefreshTokenAsync(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
     public async Task RefreshToken_WithReusedToken_InvalidatesSessionAndThrows()
     {
         // Arrange - Simulating token reuse attack
-        var plainToken = "reused-token";
+        var plainToken = "reused-token-0123456789abcdef012345";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -356,7 +536,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-123";
-        var plainToken = "old-token";
+        var plainToken = "old-token-0123456789abcdef0123456789";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -395,7 +575,7 @@ public class TokenServiceTests
     {
         // Arrange
         var userId = "user-999";
-        var plainToken = "valid-token-no-user";
+        var plainToken = "valid-token-no-user-0123456789abcdef";
         var hashedToken = Convert.ToBase64String(
             System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(plainToken))
         );
@@ -422,8 +602,12 @@ public class TokenServiceTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*nessun utente trovato*");
 
-        _repositoryMock.Verify(x => x.UpdateRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
-        _repositoryMock.Verify(x => x.AddRefreshTokenAsync(It.IsAny<RefreshToken>()), Times.Never);
+        _repositoryMock.Verify(x => x.TryRotateRefreshTokenAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>()), Times.Never);
         _repositoryMock.Verify(x => x.SaveChangesAsync(), Times.Never);
     }
 
@@ -442,3 +626,4 @@ public class TokenServiceTests
         result.Error.Should().Contain("token non valido");
     }
 }
+

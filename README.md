@@ -1,36 +1,51 @@
-AuthLibrary
-============
+# AuthLibrary.Core
 
-Lightweight authentication library for .NET with refresh token rotation,
-rate limiting, and email-based flows. Designed to be simpler than full
-frameworks while keeping sensible security defaults.
+Lightweight authentication library for .NET (`net9.0`) with JWT access tokens,
+refresh token rotation, email verification/password reset flows, and rate limiting.
 
-Features
---------
-- Login with rate limiting
+This package gives you auth business logic and contracts.
+You still own HTTP endpoints, persistence implementation, and deployment hardening.
+
+## What You Get
+
+- Credential login with rate limiting
+- Registration with password hashing (Argon2 + pepper + per-user salt)
+- Email verification flow
+- Password recovery and reset flow
 - Refresh token rotation with reuse detection
-- Email verification and password reset flows
-- Redis-backed rate limiting with in-memory fallback
-- Configurable JWT settings
-- Optional Google ID token validation
-- Configurable rate limit rules and refresh token lifetime
-- Safe logging (PII only at Debug level)
-- Lightweight input validation for login/reset
+- Optional Google ID token login with nonce and replay protection
+- Redis-backed rate limiting with optional in-memory fallback
+- Startup configuration validation (fail-fast)
 
-Quick start
------------
-1) Add configuration (appsettings.json):
+## What This Library Does Not Do
+
+- It does not create controllers/endpoints for you
+- It does not configure ASP.NET authorization policies
+- It does not replace your DB constraints or transactions
+- It does not configure CORS/CSRF/security headers in your host app
+
+## Installation
+
+```bash
+dotnet add package AuthLibrary.Core
+```
+
+Or use a project reference during local development.
+
+## Quick Start
+
+### 1) Add configuration
 
 ```json
 {
   "JwtSettings": {
-    "Key": "this-is-a-very-long-secret-key-at-least-32-bytes",
+    "Key": "replace-with-a-strong-secret-at-least-32-bytes",
     "Issuer": "MyIssuer",
     "Audience": "MyAudience",
     "AccessTokenLifetimeMinutes": 15
   },
   "SecuritySettings": {
-    "Pepper": "my-app-secret-pepper"
+    "Pepper": "replace-with-a-server-secret"
   },
   "MailService": {
     "AppMail": "noreply@example.com",
@@ -78,10 +93,16 @@ Quick start
         "MaxIpAttempts": 10,
         "AttemptWindow": "00:30:00",
         "LockDuration": "00:15:00"
+      },
+      "ExternalLogin": {
+        "MaxUserAttempts": 5,
+        "MaxIpAttempts": 20,
+        "AttemptWindow": "00:15:00",
+        "LockDuration": "00:05:00"
       }
     },
-    "TrustedProxyIps": [ "10.0.0.1", "10.0.0.2" ],
-    "RequireRedis": false
+    "TrustedProxyIps": ["10.0.0.1", "10.0.0.2"],
+    "RequireRedis": true
   },
   "GoogleAuth": {
     "ClientId": "YOUR_GOOGLE_CLIENT_ID",
@@ -93,220 +114,226 @@ Quick start
 }
 ```
 
-2) Register services:
+### 2) Register services
 
 ```csharp
-services.AddHttpContextAccessor(); // required for rate limiting
 services.AddAuthLibrary<MyUser>(configuration);
+```
 
-// If you need trusted proxies for rate limiting:
-services.AddScoped<IRateLimitService>(sp =>
+`AddAuthLibrary` now also registers `IHttpContextAccessor` automatically.
+
+### 3) Implement repository contracts
+
+You must implement:
+
+- `IAuthRepository<TUser>`
+- Optionally `ITransactionalAuthRepository<TUser>` (strongly recommended)
+
+For Google login user provisioning, also implement:
+
+- `IExternalUserFactory<TUser>`
+
+### 4) Add email templates
+
+Place templates under `TemplateSettings:BasePath`:
+
+- `VerifyEmail.html`
+- `ResetPassword.html`
+
+Supported placeholders:
+
+- `{{username}}`
+- `{{url}}`
+
+Template values are HTML encoded by the library.
+
+## Security-Critical Integration Requirements
+
+These are mandatory in production:
+
+1. Enforce DB unique constraints on `Username` and `Email`.
+2. Keep refresh token rotation atomic in `TryRotateRefreshTokenAsync`.
+3. Wrap multi-step updates in DB transactions (`ITransactionalAuthRepository<TUser>`).
+4. Keep secrets in secure secret storage, never in source control.
+5. Set `RateLimit:RequireRedis=true` for distributed deployments.
+6. Configure trusted proxies (`RateLimit:TrustedProxyIps`) correctly.
+7. Treat all public user identifiers from clients as untrusted.
+
+## Main Contracts
+
+### `IAuthUser`
+
+Your user model must include:
+
+- `Id`, `Username`, `Email`
+- `Password`, `Salt`
+- `EmailVerified`
+- `PasswordUpdatedAt`
+- `Name`, `LastName`
+
+### `IAuthService<TUser>`
+
+Primary entry points:
+
+- `Login`
+- `AddUser`
+- `RecoveryPassword`
+- `ResetPasswordRedirect`
+- `ResetPassword`
+- `VerifyMail`
+- `ResendVerificationEmail`
+- `ExternalLoginWithGoogle`
+
+### `ITokenService<TUser>`
+
+Token operations:
+
+- `GenerateAccessToken`
+- `CreateRefreshToken`
+- `RefreshToken` / `TryRefreshToken`
+
+## Behavior by Flow
+
+### Registration
+
+- Validates email/username/password
+- Normalizes email (trim + lower)
+- Always generates a server-owned `user.Id`
+- Hashes password with Argon2 using `password + pepper`
+- Stores only hashed tokens for verify/reset/refresh
+
+### Login
+
+- Input validation before repository lookup
+- Pre-auth throttling is IP scoped
+- Requires verified email
+- Uses constant-time compare for password hash
+- On success, resets only user-scoped login counters (not IP counters)
+
+### Refresh Token
+
+- Validates token format and length
+- Uses hashed token lookup
+- Rotates token via `TryRotateRefreshTokenAsync`
+- If reuse is detected, invalidates all sessions for that user
+- Invalidates tokens created before `PasswordUpdatedAt`
+
+### Email verification and password recovery
+
+- `RecoveryPassword` is enumeration-safe and always returns generic success text
+- `ResendVerificationEmail` is enumeration-safe and returns generic success behavior
+- Expired tokens are cleaned up
+
+### Google login
+
+- Validates issuer, audience, lifetime, signature
+- Optional nonce check (`expectedNonce`)
+- Optional hosted domain restriction (`AllowedHostedDomain`)
+- Replay cooldown keyed by hash of the incoming `id_token`
+
+## Result and Error Contract
+
+All methods return `Result` / `Result<T>`:
+
+- `IsSuccess` / `IsFailure`
+- `Error` message on failure
+- `ErrorCode` stable code string (when provided)
+
+Typical `AuthErrorCode` values:
+
+- `InvalidCredentials`
+- `UserBlocked`
+- `RateLimited`
+- `InvalidToken`
+- `TokenRefreshError`
+- `EmailNotVerified`
+- `RegistrationInvalid`
+- `RecoveryError`
+
+## Configuration Validation Rules
+
+Startup fails fast when configuration is invalid.
+
+### `JwtSettings`
+
+- `Key`: required, minimum 32 bytes
+- `Issuer`: required
+- `Audience`: required
+- `AccessTokenLifetimeMinutes`: `1..60`
+
+### `SecuritySettings`
+
+- `Pepper`: required
+
+### `RefreshTokenSettings`
+
+- `RefreshTokenLifetimeDays`: `1..90`
+
+### `AuthSettings`
+
+- `FrontendUrl`: absolute URL
+- Must be HTTPS, except local loopback HTTP
+
+### `TemplateSettings`
+
+- `BasePath`: required
+
+### `RateLimit`
+
+- Rules must exist for all request types
+- Thresholds/windows must be positive
+- `TrustedProxyIps` must contain valid IPs when set
+
+## Default Rate Limit Rules
+
+| Type          | MaxUserAttempts | MaxIpAttempts | AttemptWindow | LockDuration |
+|---------------|------------------|----------------|---------------|--------------|
+| Login         | 5                | 20             | 15m           | 5m           |
+| Register      | 3                | 10             | 30m           | 10m          |
+| VerifyEmail   | 5                | 15             | 60m           | 15m          |
+| ResetPassword | 3                | 10             | 30m           | 15m          |
+| ExternalLogin | 5                | 20             | 15m           | 5m           |
+
+## Minimal API Example
+
+```csharp
+app.MapPost("/api/auth/login", async (LoginDto body, IAuthService<MyUser> auth) =>
 {
-    var redis = sp.GetRequiredService<IRedisService>();
-    var http = sp.GetRequiredService<IHttpContextAccessor>();
-    return new RateLimitService(
-        redis,
-        http,
-        trustedProxyIps: new[] { "10.0.0.1", "10.0.0.2" });
+    var result = await auth.Login(body.Username, body.Password);
+    if (result.IsFailure) return Results.BadRequest(new { result.Error, result.ErrorCode });
+    return Results.Ok(result.Value);
 });
-```
 
-3) Implement IAuthRepository<TUser> (see below).
-
-4) Add email templates in your app:
-- templates/VerifyEmail.html
-- templates/ResetPassword.html
-  Use placeholders `{{username}}` and `{{url}}`.
-
-Repository contract (required)
-------------------------------
-You must implement IAuthRepository<TUser> for your storage backend. The
-interface includes methods to:
-- Store/retrieve users
-- Store/retrieve/remove email verification tokens
-- Store/retrieve/remove password reset tokens
-- Store/rotate refresh tokens
-- Store/retrieve external logins (e.g., Google)
-
-Example skeleton (EF Core style)
---------------------------------
-```csharp
-public sealed class AuthRepository : IAuthRepository<MyUser>
+app.MapPost("/api/auth/refresh", async (RefreshDto body, ITokenService<MyUser> tokens) =>
 {
-    private readonly AuthDbContext _db;
+    var result = await tokens.TryRefreshToken(body.RefreshToken);
+    if (result.IsFailure) return Results.Unauthorized();
+    return Results.Ok(result.Value);
+});
 
-    public AuthRepository(AuthDbContext db) { _db = db; }
-
-    public Task<MyUser?> GetUserByUsernameAsync(string username) =>
-        _db.Users.FirstOrDefaultAsync(u => u.Username == username);
-
-    public Task<MyUser?> GetUserByEmailAsync(string email) =>
-        _db.Users.FirstOrDefaultAsync(u => u.Email == email);
-
-    public Task<MyUser?> GetUserByIdAsync(string id) =>
-        _db.Users.FirstOrDefaultAsync(u => u.Id == id);
-
-    public Task<bool> UserExistsAsync(string username, string email) =>
-        _db.Users.AnyAsync(u => u.Username == username || u.Email == email);
-
-    public Task AddUserAsync(MyUser user) { _db.Users.Add(user); return Task.CompletedTask; }
-    public Task UpdateUserAsync(MyUser user) { _db.Users.Update(user); return Task.CompletedTask; }
-    public Task RemoveUserAsync(MyUser user) { _db.Users.Remove(user); return Task.CompletedTask; }
-
-    public Task AddEmailVerifiedTokenAsync(EmailVerifiedToken token)
-    { _db.EmailVerifiedTokens.Add(token); return Task.CompletedTask; }
-
-    public Task<EmailVerifiedToken?> GetEmailVerifiedTokenAsync(string tokenHash) =>
-        _db.EmailVerifiedTokens.FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
-
-    public Task RemoveEmailVerifiedTokenAsync(EmailVerifiedToken token)
-    { _db.EmailVerifiedTokens.Remove(token); return Task.CompletedTask; }
-
-    public Task RemoveEmailVerifiedTokensByUserIdAsync(string userId)
-    {
-        _db.EmailVerifiedTokens.RemoveRange(_db.EmailVerifiedTokens.Where(t => t.UserId == userId));
-        return Task.CompletedTask;
-    }
-
-    public Task AddPasswordResetTokenAsync(PasswordResetToken token)
-    { _db.PasswordResetTokens.Add(token); return Task.CompletedTask; }
-
-    public Task<PasswordResetToken?> GetPasswordResetTokenAsync(string tokenHash) =>
-        _db.PasswordResetTokens.FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
-
-    public Task RemovePasswordResetTokenAsync(PasswordResetToken token)
-    { _db.PasswordResetTokens.Remove(token); return Task.CompletedTask; }
-
-    public Task RemovePasswordResetTokensByUserIdAsync(string userId)
-    {
-        _db.PasswordResetTokens.RemoveRange(_db.PasswordResetTokens.Where(t => t.UserId == userId));
-        return Task.CompletedTask;
-    }
-
-    public Task AddRefreshTokenAsync(RefreshToken token)
-    { _db.RefreshTokens.Add(token); return Task.CompletedTask; }
-
-    public Task<RefreshToken?> GetRefreshTokenAsync(string tokenHash) =>
-        _db.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
-
-    public Task UpdateRefreshTokenAsync(RefreshToken token)
-    { _db.RefreshTokens.Update(token); return Task.CompletedTask; }
-
-    public Task RemoveRefreshTokensByUserIdAsync(string userId)
-    {
-        _db.RefreshTokens.RemoveRange(_db.RefreshTokens.Where(t => t.UserId == userId));
-        return Task.CompletedTask;
-    }
-
-    public Task<ExternalAuthLogin?> GetExternalLoginAsync(string provider, string subject) =>
-        _db.ExternalAuthLogins.FirstOrDefaultAsync(l => l.Provider == provider && l.Subject == subject);
-
-    public Task AddExternalLoginAsync(ExternalAuthLogin login)
-    { _db.ExternalAuthLogins.Add(login); return Task.CompletedTask; }
-
-    public Task SaveChangesAsync() => _db.SaveChangesAsync();
-}
+public sealed record LoginDto(string Username, string Password);
+public sealed record RefreshDto(string RefreshToken);
 ```
 
-Usage (Controllers or Minimal API)
-----------------------------------
-```csharp
-[ApiController]
-[Route("api/auth")]
-public class AuthController : ControllerBase
-{
-    private readonly IAuthService<MyUser> _auth;
-    private readonly ITokenService<MyUser> _token;
+## Production Checklist
 
-    public AuthController(IAuthService<MyUser> auth, ITokenService<MyUser> token)
-    {
-        _auth = auth;
-        _token = token;
-    }
+Before shipping:
 
-    [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginDto body)
-    {
-        var result = await _auth.Login(body.Username, body.Password);
-        return result.IsSuccess ? Ok(result.Value) : BadRequest(result.Error);
-    }
+1. Repository implementation reviewed for transaction and uniqueness guarantees.
+2. Refresh token rotation tested under concurrency.
+3. Redis mandatory in production and monitored.
+4. Secrets rotated and loaded from secure provider.
+5. Logging policy reviewed to avoid sensitive data exposure.
+6. Host app has strict CORS/AuthZ/headers and CSRF strategy (if cookie-based).
+7. Integration tests cover login/register/recovery/refresh edge cases.
 
-    [HttpPost("refresh")]
-    public async Task<IActionResult> Refresh([FromBody] string refreshToken)
-    {
-        var result = await _token.TryRefreshToken(refreshToken);
-        return result.IsSuccess ? Ok(result.Value) : Unauthorized(result.Error);
-    }
+## Testing
 
-    [HttpPost("google")]
-    public async Task<IActionResult> GoogleLogin([FromBody] string idToken)
-    {
-        var result = await _auth.ExternalLoginWithGoogle(idToken);
-        return result.IsSuccess ? Ok(result.Value) : Unauthorized(result.Error);
-    }
-}
-```
-
-Configuration reference
------------------------
-JwtSettings
-- Key: HMAC key, minimum 32 bytes (required).
-- Issuer, Audience: used in JWT (recommended).
-- AccessTokenLifetimeMinutes: must be > 0.
-
-SecuritySettings
-- Pepper: required. Used in password hashing.
-
-MailService
-- SMTP settings for MailKit.
-- TimeoutSeconds: operation timeout (default 30).
-- RetryCount: retry attempts on transient errors (default 1).
-- RetryDelayMilliseconds: delay between retries (default 500).
-
-AuthSettings
-- FrontendUrl: base URL for verify/reset links.
-
-TemplateSettings
-- BasePath: folder for HTML templates.
-
-RefreshTokenSettings
-- RefreshTokenLifetimeDays: default 30.
-
-RateLimit
-- Rules: dictionary keyed by enum name (Login, Register, VerifyEmail, ResetPassword).
-  If omitted, defaults are used.
-- TrustedProxyIps: list of proxy IPs allowed to set X-Forwarded-For. If empty, the library uses the remote IP (safe, but may cause shared rate limiting behind a proxy).
-- RequireRedis: if true and Redis is configured but unavailable, the library will throw on startup instead of falling back to in-memory.
-
-GoogleAuth
-- ClientId: required to validate Google ID tokens.
-- AllowedHostedDomain: optional restriction by Google Workspace domain (claim `hd`).
-Google sign-in requires registering `IExternalUserFactory<TUser>` in your app to create/link users.
-
-Validation rules
-----------------
-- Login: username and password required.
-- ResetPassword: token, password, confirm password required.
-- Password strength: handled by IPasswordValidator (default: length + upper/lower/digit/special).
-
-Logging
--------
-- Email/username is logged only at Debug level.
-- Info/Warning messages are safe for production logs.
-- If Redis is unavailable, a warning is logged and in-memory fallback is used (unless `RateLimit:RequireRedis` is true).
-
-Security notes
---------------
-- JWT key must be at least 32 bytes.
-- Refresh tokens are stored as SHA256 hashes; only the plain token is returned.
-- Refresh token reuse invalidates all sessions for that user.
-- Rate limiting uses Redis when available; in-memory fallback is best-effort.
-- X-Forwarded-For is honored only for trusted proxies (configure explicitly).
-- Pepper is mandatory; the library throws on startup if missing.
-- Google login expects a valid Google `id_token` generated by your app’s OAuth flow.
-
-Testing
--------
 ```bash
 dotnet test
 ```
+
+## Notes on Package Reproducibility
+
+The projects are configured with lock files (`RestorePackagesWithLockFile=true`).
+Commit `packages.lock.json` for deterministic restores in CI.

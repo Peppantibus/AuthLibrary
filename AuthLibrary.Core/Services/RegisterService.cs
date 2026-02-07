@@ -2,11 +2,12 @@ using System.Security.Cryptography;
 using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class RegisterService<TUser> where TUser : class, IAuthUser
+internal sealed class RegisterService<TUser> : IRegisterService<TUser> where TUser : class, IAuthUser
 {
     private readonly AuthRuntime<TUser> _runtime;
     private readonly EmailVerificationService<TUser> _emailVerificationService;
@@ -19,47 +20,58 @@ internal sealed class RegisterService<TUser> where TUser : class, IAuthUser
 
     public async Task<Result> AddUser(TUser user)
     {
+        if (user == null)
+        {
+            return AuthErrorCatalog.Fail(AuthErrorCode.InvalidUser);
+        }
+
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(user.Email);
-        if (!string.IsNullOrWhiteSpace(normalizedEmail))
+        var emailValidation = InputValidators.ValidateEmail(normalizedEmail);
+        if (emailValidation.IsFailure)
         {
-            user.Email = normalizedEmail;
+            return AuthErrorCatalog.Fail(AuthErrorCode.InvalidEmail, emailValidation.Error);
         }
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
-            RateLimitRequestType.Register,
-            normalizedEmail,
-            "utente bloccato");
-        if (blockedResult.IsFailure)
+        var usernameValidation = InputValidators.ValidateUsername(user.Username);
+        if (usernameValidation.IsFailure)
         {
-            _runtime.Logger.LogWarning("Registrazione bloccata");
-            _runtime.Logger.LogDebug("Registrazione bloccata per email {email}", user.Email);
-            return Result.Fail(blockedResult.Error);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid, usernameValidation.Error);
         }
 
-        var attemptResult = await _runtime.RateLimitGuard.RegisterAttempt(
+        user.Email = normalizedEmail;
+        if (!string.IsNullOrWhiteSpace(user.Username))
+        {
+            user.Username = user.Username.Trim();
+        }
+
+        // Keep identity server-owned to prevent caller-controlled account identifiers.
+        user.Id = Guid.NewGuid().ToString();
+
+        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Register,
             normalizedEmail,
+            "utente bloccato",
             "utente bloccato per troppi tentativi");
-        if (attemptResult.IsFailure)
+        if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Registrazione bloccata (rate limit)");
-            _runtime.Logger.LogDebug("Registrazione bloccata per email {email} (rate limit)", user.Email);
-            return Result.Fail(attemptResult.Error);
+            _runtime.Logger.LogDebug("Registrazione bloccata (rate limit)");
+            return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
         var exists = await _runtime.Repository.UserExistsAsync(user.Username, normalizedEmail);
         if (exists)
         {
             _runtime.Logger.LogWarning("Tentativo di registrazione con email/username gia usata");
-            _runtime.Logger.LogDebug("Tentativo di registrazione con email/username gia usata: {email}", user.Email);
-            return Result.Fail("registrazione non valida");
+            _runtime.Logger.LogDebug("Tentativo di registrazione con email/username gia usata");
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid);
         }
 
         if (!_runtime.PasswordValidator.IsValid(user.Password, out var passwordError))
         {
             _runtime.Logger.LogWarning("Registrazione fallita: password debole");
-            _runtime.Logger.LogDebug("Registrazione fallita: password debole per email {email}", user.Email);
-            return Result.Fail(passwordError);
+            _runtime.Logger.LogDebug("Registrazione fallita: password debole");
+            return AuthErrorCatalog.Fail(AuthErrorCode.RegistrationInvalid, passwordError);
         }
 
         var salt = RandomNumberGenerator.GetBytes(16);
@@ -68,9 +80,6 @@ internal sealed class RegisterService<TUser> where TUser : class, IAuthUser
         user.Salt = Convert.ToBase64String(salt);
         user.EmailVerified = false;
 
-        await _runtime.Repository.AddUserAsync(user);
-        await _runtime.Repository.SaveChangesAsync();
-
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
         var emailVerified = new EmailVerifiedToken
         {
@@ -78,8 +87,13 @@ internal sealed class RegisterService<TUser> where TUser : class, IAuthUser
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddMinutes(30)
         };
-        await _runtime.Repository.AddEmailVerifiedTokenAsync(emailVerified);
-        await _runtime.Repository.SaveChangesAsync();
+
+        await ExecuteInTransaction(async () =>
+        {
+            await _runtime.Repository.AddUserAsync(user);
+            await _runtime.Repository.AddEmailVerifiedTokenAsync(emailVerified);
+            await _runtime.Repository.SaveChangesAsync();
+        });
 
         Result emailResult;
         try
@@ -95,22 +109,30 @@ internal sealed class RegisterService<TUser> where TUser : class, IAuthUser
         }
         catch (Exception ex)
         {
-            _runtime.Logger.LogError(ex, "Invio email di verifica fallito per {email}", user.Email);
-            emailResult = Result.Fail("Impossibile inviare email di verifica. Riprova più tardi.");
+            _runtime.Logger.LogError(ex, "Invio email di verifica fallito");
+            emailResult = AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email di verifica. Riprova piu tardi.");
         }
 
         if (emailResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Invio email fallito, rollback registrazione");
-            _runtime.Logger.LogDebug("Invio email fallito per {email}, rollback registrazione", user.Email);
-            await _runtime.Repository.RemoveUserAsync(user);
-            await _runtime.Repository.RemoveEmailVerifiedTokenAsync(emailVerified);
-            await _runtime.Repository.SaveChangesAsync();
-            return Result.Fail("Impossibile inviare email di verifica. Riprova più tardi.");
+            _runtime.Logger.LogDebug("Invio email fallito, rollback registrazione");
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveUserAsync(user);
+                await _runtime.Repository.RemoveEmailVerifiedTokenAsync(emailVerified);
+                await _runtime.Repository.SaveChangesAsync();
+            });
+            return Result.Fail(emailResult.Error, emailResult.ErrorCode);
         }
 
         _runtime.Logger.LogInformation("Registrazione completata");
-        _runtime.Logger.LogDebug("Registrazione completata per utente {email}", user.Email);
+        _runtime.Logger.LogDebug("Registrazione completata");
         return Result.Ok();
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        return _runtime.ExecuteInTransactionAsync(operation);
     }
 }

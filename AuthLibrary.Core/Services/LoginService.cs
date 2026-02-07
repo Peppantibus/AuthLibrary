@@ -8,19 +8,22 @@ using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class LoginService<TUser> where TUser : class, IAuthUser
+internal sealed class LoginService<TUser> : ILoginService<TUser> where TUser : class, IAuthUser
 {
+    private static readonly byte[] MissingUserSalt = RandomNumberGenerator.GetBytes(16);
     private readonly AuthRuntime<TUser> _runtime;
+    private readonly byte[] _missingUserHash;
 
     public LoginService(AuthRuntime<TUser> runtime)
     {
         _runtime = runtime;
+        _missingUserHash = _runtime.HashPassword("invalid-password", MissingUserSalt);
     }
 
     public async Task<Result<RefreshTokenDto>> Login(string username, string password)
     {
         _runtime.Logger.LogInformation("Tentativo login");
-        _runtime.Logger.LogDebug("Tentativo login per utente {username}", username);
+        _runtime.Logger.LogDebug("Tentativo login");
 
         var validationResult = InputValidators.ValidateLogin(username, password);
         if (validationResult.IsFailure)
@@ -28,63 +31,71 @@ internal sealed class LoginService<TUser> where TUser : class, IAuthUser
             return Result.Fail<RefreshTokenDto>(validationResult.Error);
         }
 
+        // Pre-auth throttling is IP scoped to reduce account lockout abuse.
+        var ipScopeKey = string.Empty;
         var rateLimitKey = AuthRuntime<TUser>.NormalizeIdentifier(username);
-        var rateLimitResult = await _runtime.RateLimitGuard.RegisterAttempt(
+        var preAuthRateLimit = await _runtime.RateLimitGuard.EnsureNotBlockedAndRegisterAttempt(
             RateLimitRequestType.Login,
-            rateLimitKey,
+            ipScopeKey,
+            "utente bloccato",
             "utente bloccato per troppi tentativi");
-        if (rateLimitResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Login bloccato (rate limit)");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (rate limit)", username);
-            return Result.Fail<RefreshTokenDto>(rateLimitResult.Error);
-        }
-
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
-            RateLimitRequestType.Login,
-            rateLimitKey,
-            "utente bloccato");
-        if (blockedResult.IsFailure)
+        if (preAuthRateLimit.IsFailure)
         {
             _runtime.Logger.LogWarning("Login bloccato");
-            _runtime.Logger.LogDebug("Login bloccato per utente {username} (pre-existing lock)", username);
-            return Result.Fail<RefreshTokenDto>(blockedResult.Error);
+            _runtime.Logger.LogDebug("Login bloccato (ip policy pre-auth)");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserBlocked, preAuthRateLimit.Error);
         }
 
         var user = await _runtime.Repository.GetUserByUsernameAsync(username);
-        if (user == null)
-        {
-            _runtime.Logger.LogWarning("Login fallito: utente non trovato");
-            _runtime.Logger.LogDebug("Login fallito: utente {username} non trovato", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
-        }
-
-        if (!user.EmailVerified)
-        {
-            _runtime.Logger.LogWarning("Login fallito: email non verificata");
-            _runtime.Logger.LogDebug("Login fallito: email non verificata per utente {username}", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
-        }
-
         byte[] storedHash;
         byte[] saltBytes;
-        try
+        var userExists = user != null;
+
+        if (!userExists)
         {
-            storedHash = Convert.FromBase64String(user.Password);
-            saltBytes = Convert.FromBase64String(user.Salt);
+            // Keep a comparable crypto path for unknown users to reduce timing side-channels.
+            saltBytes = MissingUserSalt;
+            storedHash = _missingUserHash;
         }
-        catch
+        else
         {
-            return Result.Fail<RefreshTokenDto>("Errore dati utente");
+            try
+            {
+                storedHash = Convert.FromBase64String(user!.Password);
+                saltBytes = Convert.FromBase64String(user.Salt);
+            }
+            catch
+            {
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.UserDataInvalid);
+            }
         }
 
         var testHashed = _runtime.HashPassword(password, saltBytes);
-        var isValid = CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
+        var isValid = userExists
+            && user!.EmailVerified
+            && CryptographicOperations.FixedTimeEquals(storedHash, testHashed);
         if (!isValid)
         {
+            // Keep account-scoped throttling uniform to avoid username enumeration side channels.
+            var accountLimit = await _runtime.RateLimitGuard.RegisterAttempt(
+                RateLimitRequestType.Login,
+                rateLimitKey,
+                "utente bloccato per troppi tentativi");
+            if (accountLimit.IsFailure)
+            {
+                _runtime.Logger.LogWarning("Login bloccato (rate limit account)");
+                _runtime.Logger.LogDebug("Login bloccato (account rate limit)");
+                return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+            }
+
             _runtime.Logger.LogWarning("Login fallito: credenziali non valide");
-            _runtime.Logger.LogDebug("Login fallito: password errata per utente {username}", username);
-            return Result.Fail<RefreshTokenDto>("Credenziali non valide");
+            _runtime.Logger.LogDebug("Login fallito: credenziali non valide");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
+        }
+
+        if (user is null)
+        {
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidCredentials);
         }
 
         var accessToken = _runtime.TokenService.GenerateAccessToken(user);
@@ -92,7 +103,7 @@ internal sealed class LoginService<TUser> where TUser : class, IAuthUser
         await _runtime.RateLimitService.Reset(RateLimitRequestType.Login, rateLimitKey);
 
         _runtime.Logger.LogInformation("Login riuscito");
-        _runtime.Logger.LogDebug("Login riuscito per utente {username}", username);
+        _runtime.Logger.LogDebug("Login riuscito");
 
         return Result.Ok(new RefreshTokenDto
         {

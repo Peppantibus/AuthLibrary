@@ -19,6 +19,7 @@ internal sealed class AuthRuntime<TUser> where TUser : class, IAuthUser
     public IExternalTokenValidator ExternalTokenValidator { get; }
     public IExternalUserFactory<TUser>? ExternalUserFactory { get; }
     public RateLimitGuard RateLimitGuard { get; }
+    public bool RequireTransactionalRepository { get; }
 
     private readonly string _pepper;
 
@@ -29,6 +30,7 @@ internal sealed class AuthRuntime<TUser> where TUser : class, IAuthUser
         ITokenService<TUser> tokenService,
         IRateLimitService rateLimitService,
         IMailTemplateService templateService,
+        bool requireTransactionalRepository,
         AuthSettings authSettings,
         MailSettings mailSettings,
         ILogger<AuthService<TUser>> logger,
@@ -42,6 +44,7 @@ internal sealed class AuthRuntime<TUser> where TUser : class, IAuthUser
         TokenService = tokenService;
         RateLimitService = rateLimitService;
         TemplateService = templateService;
+        RequireTransactionalRepository = requireTransactionalRepository;
         AuthSettings = authSettings;
         MailSettings = mailSettings;
         Logger = logger;
@@ -49,6 +52,16 @@ internal sealed class AuthRuntime<TUser> where TUser : class, IAuthUser
         ExternalTokenValidator = externalTokenValidator;
         ExternalUserFactory = externalUserFactory;
         RateLimitGuard = new RateLimitGuard(rateLimitService);
+
+        if (RequireTransactionalRepository && repository is not ITransactionalAuthRepository<TUser>)
+        {
+            throw new InvalidOperationException("Registrare ITransactionalAuthRepository<TUser> per garantire operazioni atomiche.");
+        }
+
+        if (!RequireTransactionalRepository && repository is not ITransactionalAuthRepository<TUser>)
+        {
+            Logger.LogWarning("Repository non transazionale: alcune operazioni multi-step non saranno atomiche.");
+        }
     }
 
     public byte[] HashPassword(string password, byte[] salt)
@@ -94,5 +107,20 @@ internal sealed class AuthRuntime<TUser> where TUser : class, IAuthUser
     public static string NormalizeIdentifier(string identifier)
     {
         return string.IsNullOrWhiteSpace(identifier) ? string.Empty : identifier.Trim().ToLowerInvariant();
+    }
+
+    public Task ExecuteInTransactionAsync(Func<Task> operation)
+    {
+        if (Repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        if (RequireTransactionalRepository)
+        {
+            throw new InvalidOperationException("Repository non transazionale: operazione bloccata per sicurezza.");
+        }
+
+        return operation();
     }
 }

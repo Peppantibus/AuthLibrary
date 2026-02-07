@@ -68,4 +68,55 @@ public class InMemoryCacheServiceTests
         missingResult.Should().BeFalse();
         existingResult.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task TrySetValue_WhenKeyMissing_ReturnsTrueAndStoresValue()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new InMemoryCacheService(cache);
+
+        // Act
+        var created = await service.TrySetValue("key", "value", TimeSpan.FromMinutes(1));
+        var stored = await service.GetValue("key");
+
+        // Assert
+        created.Should().BeTrue();
+        stored.Should().Be("value");
+    }
+
+    [Fact]
+    public async Task TrySetValue_WhenKeyExists_ReturnsFalse()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new InMemoryCacheService(cache);
+        await service.SetValue("key", "first", TimeSpan.FromMinutes(1));
+
+        // Act
+        var created = await service.TrySetValue("key", "second", TimeSpan.FromMinutes(1));
+        var stored = await service.GetValue("key");
+
+        // Assert
+        created.Should().BeFalse();
+        stored.Should().Be("first");
+    }
+
+    [Fact]
+    public async Task TrySetValue_WithConcurrentCalls_AllowsSingleWinner()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new InMemoryCacheService(cache);
+        var attempts = Enumerable.Range(0, 20)
+            .Select(_ => service.TrySetValue("race-key", "1", TimeSpan.FromMinutes(1)))
+            .ToArray();
+
+        // Act
+        var results = await Task.WhenAll(attempts);
+
+        // Assert
+        results.Count(x => x).Should().Be(1);
+        results.Count(x => !x).Should().Be(19);
+    }
 }

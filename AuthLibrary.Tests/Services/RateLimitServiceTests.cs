@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using AuthLibrary.Tests.Helpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Memory;
 
 using MockFactory = AuthLibrary.Tests.Helpers.MockFactory;
 
@@ -99,6 +100,22 @@ public class RateLimitServiceTests
     }
 
     [Fact]
+    public async Task RegisterAttempted_WithEmptyIdentifier_TracksOnlyIp()
+    {
+        // Arrange
+        _redisServiceMock.Setup(x => x.Increment(It.IsAny<string>(), It.IsAny<double>())).ReturnsAsync(1);
+
+        // Act
+        var result = await _rateLimitService.RegisterAttempted(RateLimitRequestType.Login, string.Empty);
+
+        // Assert
+        result.Should().BeFalse();
+        _redisServiceMock.Verify(x => x.Increment($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100", 1), Times.Once);
+        _redisServiceMock.Verify(x => x.Increment($"rl:attempt:{RateLimitRequestType.Login}:", 1), Times.Never);
+        _redisServiceMock.Verify(x => x.Expire($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100", It.IsAny<TimeSpan>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RegisterAttempted_ExceedsIpLimit_BlocksIpAndReturnsTrue()
     {
         // Arrange
@@ -147,7 +164,7 @@ public class RateLimitServiceTests
     }
 
     [Fact]
-    public async Task Reset_RemovesAttemptsForBothIpAndUser()
+    public async Task Reset_RemovesOnlyUserScopedState()
     {
         // Arrange
         var identifier = "user@test.com";
@@ -156,8 +173,9 @@ public class RateLimitServiceTests
         await _rateLimitService.Reset(RateLimitRequestType.Login, identifier);
 
         // Assert
-        _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Once);
         _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:{identifier}"), Times.Once);
+        _redisServiceMock.Verify(x => x.Remove($"rl:lock:{RateLimitRequestType.Login}:{identifier}"), Times.Once);
+        _redisServiceMock.Verify(x => x.Remove($"rl:attempt:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Never);
     }
 
     [Fact]
@@ -209,7 +227,41 @@ public class RateLimitServiceTests
     }
 
     [Fact]
-    public async Task GetClientIP_WithXForwardedForHeader_UsesFirstIP()
+    public async Task TryStartCooldown_WhenKeyMissing_ReturnsTrue()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var duration = TimeSpan.FromMinutes(5);
+        _redisServiceMock
+            .Setup(x => x.TrySetValue($"rl:cooldown:{RateLimitRequestType.VerifyEmail}:{identifier}", "1", duration))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _rateLimitService.TryStartCooldown(RateLimitRequestType.VerifyEmail, identifier, duration);
+
+        // Assert
+        result.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TryStartCooldown_WhenKeyExists_ReturnsFalse()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var duration = TimeSpan.FromMinutes(5);
+        _redisServiceMock
+            .Setup(x => x.TrySetValue($"rl:cooldown:{RateLimitRequestType.VerifyEmail}:{identifier}", "1", duration))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _rateLimitService.TryStartCooldown(RateLimitRequestType.VerifyEmail, identifier, duration);
+
+        // Assert
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetClientIP_WithSpoofedXForwardedFor_UsesRightmostNonTrustedIp()
     {
         // Arrange
         var identifier = "user@test.com";
@@ -219,8 +271,51 @@ public class RateLimitServiceTests
         // Act
         await _rateLimitService.IsBlocked(RateLimitRequestType.Login, identifier);
 
-        // Assert - Should use the X-Forwarded-For IP (203.0.113.1)
-        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:203.0.113.1"), Times.Once);
+        // Assert - Should ignore spoofed leftmost IP and use rightmost appended by proxy
+        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:198.51.100.1"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetClientIP_WithInvalidXForwardedFor_FallsBackToRemoteIp()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        _httpContext.Request.Headers["X-Forwarded-For"] = "not-an-ip, also-invalid";
+        _redisServiceMock.Setup(x => x.GetValue(It.IsAny<string>())).ReturnsAsync((string?)null);
+
+        // Act
+        await _rateLimitService.IsBlocked(RateLimitRequestType.Login, identifier);
+
+        // Assert - Invalid forwarded values are ignored
+        _redisServiceMock.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:192.168.1.100"), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetClientIP_WithUntrustedProxyHeader_UsesRemoteIpFallback()
+    {
+        // Arrange
+        var identifier = "user@test.com";
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.10");
+        context.Request.Headers["X-Forwarded-For"] = "203.0.113.10";
+
+        var accessor = new Mock<IHttpContextAccessor>();
+        accessor.Setup(x => x.HttpContext).Returns(context);
+
+        var redis = MockFactory.CreateRedisService();
+        redis.Setup(x => x.GetValue(It.IsAny<string>())).ReturnsAsync((string?)null);
+
+        var service = new RateLimitService(
+            redis.Object,
+            accessor.Object,
+            trustedProxyIps: Array.Empty<string>());
+
+        // Act
+        await service.IsBlocked(RateLimitRequestType.Login, identifier);
+
+        // Assert
+        redis.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:10.0.0.10"), Times.Once);
+        redis.Verify(x => x.GetValue($"rl:lock:{RateLimitRequestType.Login}:ip:203.0.113.10"), Times.Never);
     }
 
     [Theory]
@@ -228,6 +323,7 @@ public class RateLimitServiceTests
     [InlineData(RateLimitRequestType.Register, 3, 10)]
     [InlineData(RateLimitRequestType.VerifyEmail, 5, 15)]
     [InlineData(RateLimitRequestType.ResetPassword, 3, 10)]
+    [InlineData(RateLimitRequestType.RefreshToken, 30, 60)]
     public async Task RegisterAttempted_DifferentRequestTypes_UsesCorrectLimits(
         RateLimitRequestType type, 
         int maxUserAttempts, 
@@ -251,5 +347,62 @@ public class RateLimitServiceTests
 
         // Assert
         result.Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuildConfig_WithPartialOverrides_MergesWithDefaults()
+    {
+        // Arrange
+        var settings = new RateLimitSettings
+        {
+            Rules = new Dictionary<string, RateLimitConfiguration>
+            {
+                ["Login"] = new RateLimitConfiguration
+                {
+                    MaxUserAttempts = 7,
+                    MaxIpAttempts = 30,
+                    AttemptWindow = TimeSpan.FromMinutes(10),
+                    LockDuration = TimeSpan.FromMinutes(2)
+                }
+            }
+        };
+
+        // Act
+        var config = RateLimitService.BuildConfig(settings);
+
+        // Assert
+        config[RateLimitRequestType.Login].MaxUserAttempts.Should().Be(7);
+        config.Should().ContainKey(RateLimitRequestType.Register);
+        config.Should().ContainKey(RateLimitRequestType.VerifyEmail);
+        config.Should().ContainKey(RateLimitRequestType.ResetPassword);
+        config.Should().ContainKey(RateLimitRequestType.ExternalLogin);
+        config.Should().ContainKey(RateLimitRequestType.RefreshToken);
+    }
+
+    [Fact]
+    public async Task TryStartCooldown_WithConcurrentCalls_AllowsSingleWinner()
+    {
+        // Arrange
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var redis = new InMemoryCacheService(cache);
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.168.1.100");
+        var accessor = new Mock<IHttpContextAccessor>();
+        accessor.Setup(x => x.HttpContext).Returns(context);
+
+        var service = new RateLimitService(redis, accessor.Object);
+        var attempts = Enumerable.Range(0, 20)
+            .Select(_ => service.TryStartCooldown(
+                RateLimitRequestType.ExternalLogin,
+                "same-key",
+                TimeSpan.FromMinutes(1)))
+            .ToArray();
+
+        // Act
+        var results = await Task.WhenAll(attempts);
+
+        // Assert
+        results.Count(x => x).Should().Be(1);
+        results.Count(x => !x).Should().Be(19);
     }
 }

@@ -3,9 +3,11 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using AuthLibrary.Configuration;
+using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
 using AuthLibrary.Models.Dto.Auth;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -17,21 +19,28 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     private readonly JwtSettings _jwt;
     private readonly ILogger<TokenService<TUser>> _logger;
     private readonly IAuthRepository<TUser> _repository;
+    private readonly IRateLimitService _rateLimitService;
+    private readonly bool _requireTransactionalRepository;
     private readonly RefreshTokenSettings _refreshTokenSettings;
 
     public TokenService(
         IOptions<JwtSettings> jwtSettings,
         ILogger<TokenService<TUser>> logger,
         IAuthRepository<TUser> repository,
-        IOptions<RefreshTokenSettings> refreshTokenSettings)
+        IOptions<RefreshTokenSettings> refreshTokenSettings,
+        IRateLimitService rateLimitService,
+        IOptions<SecuritySettings> securitySettings)
     {
         _jwt = jwtSettings.Value;
         _logger = logger;
         _repository = repository;
         _refreshTokenSettings = refreshTokenSettings.Value;
+        _rateLimitService = rateLimitService;
+        _requireTransactionalRepository = securitySettings.Value.RequireTransactionalRepository;
         
         // SECURITY: Validate JWT key configuration
         ValidateJwtConfiguration();
+        ValidateRepositoryConfiguration();
     }
 
     /// <summary>
@@ -81,6 +90,14 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
     public async Task<RefreshTokenDto> RefreshToken(string token)
     {
+        await EnsureNotRefreshRateLimited();
+
+        var tokenValidation = InputValidators.ValidateToken(token);
+        if (tokenValidation.IsFailure)
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+
         var (result, user) = await ValidateRefreshTokenWithUser(token);
 
         var accessToken = GenerateAccessToken(user);
@@ -110,12 +127,12 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
         catch (InvalidOperationException)
         {
             _logger.LogWarning("Refresh token non valido");
-            return Result.Fail<RefreshTokenDto>("token non valido");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.InvalidToken);
         }
         catch (Exception)
         {
             _logger.LogWarning("Errore durante il refresh token");
-            return Result.Fail<RefreshTokenDto>("errore durante il refresh token");
+            return AuthErrorCatalog.Fail<RefreshTokenDto>(AuthErrorCode.TokenRefreshError);
         }
     }
 
@@ -199,8 +216,11 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
 
         if (existingEntry.ReplacedByToken != null)
         {
-             await _repository.RemoveRefreshTokensByUserIdAsync(existingEntry.UserId);
-             await _repository.SaveChangesAsync();
+             await ExecuteInTransaction(async () =>
+             {
+                 await _repository.RemoveRefreshTokensByUserIdAsync(existingEntry.UserId);
+                 await _repository.SaveChangesAsync();
+             });
             _logger.LogWarning("refresh token reuse rilevato: sessione invalidata");
             throw new InvalidOperationException("token non valido");
         }
@@ -234,38 +254,66 @@ public class TokenService<TUser> : ITokenService<TUser> where TUser : class, IAu
     {
         if (oldEntity == null) { throw new InvalidOperationException("token non trovato"); }
 
-        // SECURITY: Re-fetch token to check for concurrent modification (race condition protection)
-        var currentState = await _repository.GetRefreshTokenAsync(oldEntity.TokenHash);
-        if (currentState == null || currentState.RevokedAt != null || currentState.ReplacedByToken != null)
+        string newToken = GenerateRefreshToken();
+        string newTokenHash = HashToken(newToken);
+        var now = DateTime.UtcNow;
+        var newExpiresAt = now.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays);
+
+        var rotated = await _repository.TryRotateRefreshTokenAsync(
+            oldEntity.TokenHash,
+            newTokenHash,
+            revokedAt: now,
+            newTokenCreatedAt: now,
+            newTokenExpiresAt: newExpiresAt);
+
+        if (!rotated)
         {
             _logger.LogWarning("Race condition detected: token already rotated during request, userId={userId}", oldEntity.UserId);
             throw new InvalidOperationException("token non valido");
         }
 
-        string newToken = GenerateRefreshToken();
-        string newTokenHash = HashToken(newToken);
-            
-        oldEntity.RevokedAt = DateTime.UtcNow;
-        oldEntity.ReplacedByToken = newTokenHash;
-
-        await _repository.UpdateRefreshTokenAsync(oldEntity);
-
-        var newEntity = new RefreshToken
-        {
-            UserId = oldEntity.UserId,
-            TokenHash = newTokenHash,
-            CreatedAt = DateTime.UtcNow,
-            ExpiresAt = DateTime.UtcNow.AddDays(_refreshTokenSettings.RefreshTokenLifetimeDays)
-        };
-
-        await _repository.AddRefreshTokenAsync(newEntity);
-        await _repository.SaveChangesAsync();
-
         return new RefreshTokenIssueResult
         {
-            UserId = newEntity.UserId,
+            UserId = oldEntity.UserId,
             PlainToken = newToken,
-            ExpiresAt = newEntity.ExpiresAt
+            ExpiresAt = newExpiresAt
         };
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        if (_repository is ITransactionalAuthRepository<TUser> transactionalRepository)
+        {
+            return transactionalRepository.ExecuteInTransactionAsync(operation);
+        }
+
+        if (_requireTransactionalRepository)
+        {
+            throw new InvalidOperationException("Registrare ITransactionalAuthRepository<TUser> per garantire operazioni atomiche.");
+        }
+
+        return operation();
+    }
+
+    private async Task EnsureNotRefreshRateLimited()
+    {
+        const string ipScopeKey = "";
+        if (await _rateLimitService.IsBlocked(RateLimitRequestType.RefreshToken, ipScopeKey))
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+
+        if (await _rateLimitService.RegisterAttempted(RateLimitRequestType.RefreshToken, ipScopeKey))
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+    }
+
+    private void ValidateRepositoryConfiguration()
+    {
+        if (_requireTransactionalRepository && _repository is not ITransactionalAuthRepository<TUser>)
+        {
+            throw new InvalidOperationException("Registrare ITransactionalAuthRepository<TUser> per garantire operazioni atomiche.");
+        }
     }
 }

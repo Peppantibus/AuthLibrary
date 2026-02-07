@@ -35,7 +35,7 @@ public class GoogleTokenValidator : IExternalTokenValidator
             documentRetriever);
     }
 
-    public async Task<ExternalUserInfo> ValidateGoogleIdToken(string idToken)
+    public async Task<ExternalUserInfo> ValidateGoogleIdToken(string idToken, string? expectedNonce = null)
     {
         if (string.IsNullOrWhiteSpace(idToken))
         {
@@ -88,6 +88,7 @@ public class GoogleTokenValidator : IExternalTokenValidator
         var email = principal.FindFirst("email")?.Value;
         var emailVerifiedRaw = principal.FindFirst("email_verified")?.Value;
         var subject = principal.FindFirst("sub")?.Value;
+        var nonce = principal.FindFirst("nonce")?.Value;
         var name = principal.FindFirst("name")?.Value;
         var givenName = principal.FindFirst("given_name")?.Value;
         var familyName = principal.FindFirst("family_name")?.Value;
@@ -106,6 +107,17 @@ public class GoogleTokenValidator : IExternalTokenValidator
             throw new InvalidOperationException("email non verificata");
         }
 
+        if (!string.IsNullOrWhiteSpace(expectedNonce) &&
+            !string.Equals(nonce, expectedNonce, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("nonce non valido");
+        }
+
+        if (validatedToken.ValidTo <= DateTime.UtcNow)
+        {
+            throw new InvalidOperationException("token non valido");
+        }
+
         if (!string.IsNullOrWhiteSpace(_settings.AllowedHostedDomain))
         {
             if (!string.Equals(hostedDomain, _settings.AllowedHostedDomain, StringComparison.OrdinalIgnoreCase))
@@ -119,6 +131,8 @@ public class GoogleTokenValidator : IExternalTokenValidator
             Subject = subject,
             Email = email,
             EmailVerified = emailVerified,
+            Nonce = nonce,
+            ExpiresAtUtc = validatedToken.ValidTo,
             Name = name,
             GivenName = givenName,
             FamilyName = familyName

@@ -1,6 +1,5 @@
 using AuthLibrary.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
-using System.Collections.Concurrent;
 
 namespace AuthLibrary.Services;
 
@@ -11,7 +10,7 @@ namespace AuthLibrary.Services;
 public class InMemoryCacheService : IRedisService
 {
     private readonly IMemoryCache _cache;
-    private readonly ConcurrentDictionary<string, object> _locks = new();
+    private readonly object[] _lockStripes;
     private readonly TimeSpan _defaultIncrementTtl;
 
     private sealed class CounterEntry
@@ -20,10 +19,14 @@ public class InMemoryCacheService : IRedisService
         public DateTime ExpiresAt { get; set; }
     }
 
-    public InMemoryCacheService(IMemoryCache cache, TimeSpan? defaultIncrementTtl = null)
+    public InMemoryCacheService(
+        IMemoryCache cache,
+        TimeSpan? defaultIncrementTtl = null,
+        int lockStripeCount = 256)
     {
         _cache = cache;
         _defaultIncrementTtl = defaultIncrementTtl ?? TimeSpan.FromMinutes(15);
+        _lockStripes = BuildLockStripes(lockStripeCount);
     }
 
     public Task<string?> GetValue(string key)
@@ -38,9 +41,24 @@ public class InMemoryCacheService : IRedisService
         return Task.CompletedTask;
     }
 
+    public Task<bool> TrySetValue(string key, string value, TimeSpan expiration)
+    {
+        var gate = GetLockStripe(key);
+        lock (gate)
+        {
+            if (_cache.TryGetValue(key, out _))
+            {
+                return Task.FromResult(false);
+            }
+
+            _cache.Set(key, value, expiration);
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<double> Increment(string key, double value)
     {
-        var gate = _locks.GetOrAdd(key, _ => new object());
+        var gate = GetLockStripe(key);
         lock (gate)
         {
             var now = DateTime.UtcNow;
@@ -73,7 +91,6 @@ public class InMemoryCacheService : IRedisService
     public Task Remove(string key)
     {
         _cache.Remove(key);
-        _locks.TryRemove(key, out _);
         return Task.CompletedTask;
     }
 
@@ -94,5 +111,24 @@ public class InMemoryCacheService : IRedisService
             return Task.FromResult(true);
         }
         return Task.FromResult(false);
+    }
+
+    private object GetLockStripe(string key)
+    {
+        var hash = key.GetHashCode();
+        var index = (hash & 0x7fffffff) % _lockStripes.Length;
+        return _lockStripes[index];
+    }
+
+    private static object[] BuildLockStripes(int lockStripeCount)
+    {
+        var size = lockStripeCount <= 0 ? 256 : lockStripeCount;
+        var stripes = new object[size];
+        for (var i = 0; i < size; i++)
+        {
+            stripes[i] = new object();
+        }
+
+        return stripes;
     }
 }

@@ -34,7 +34,7 @@ public class PasswordValidatorTests
 
         // Assert
         result.Should().BeFalse();
-        errorMessage.Should().Be("La password non può essere vuota");
+        errorMessage.Should().Be("La password non puo essere vuota");
     }
 
     [Theory]
@@ -48,6 +48,35 @@ public class PasswordValidatorTests
         // Assert
         result.Should().BeFalse();
         errorMessage.Should().Be("La password deve contenere almeno 8 caratteri");
+    }
+
+    [Fact]
+    public void IsValid_WithPasswordLongerThanMaxLength_ReturnsFalse()
+    {
+        // Arrange
+        var password = $"{new string('A', DefaultPasswordValidator.MaxPasswordLength - 3)}1!a";
+        password += "X";
+
+        // Act
+        var result = _validator.IsValid(password, out var errorMessage);
+
+        // Assert
+        result.Should().BeFalse();
+        errorMessage.Should().Be("La password supera la lunghezza massima consentita");
+    }
+
+    [Fact]
+    public void IsValid_WithControlCharacter_ReturnsFalse()
+    {
+        // Arrange
+        var password = "Valid123!\n";
+
+        // Act
+        var result = _validator.IsValid(password, out var errorMessage);
+
+        // Assert
+        result.Should().BeFalse();
+        errorMessage.Should().Be("La password contiene caratteri non validi");
     }
 
     [Fact]

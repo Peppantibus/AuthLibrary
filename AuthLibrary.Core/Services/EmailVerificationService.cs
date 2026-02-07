@@ -2,11 +2,12 @@ using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using AuthLibrary.Models;
 using AuthLibrary.Models.Dto;
+using AuthLibrary.Validation;
 using Microsoft.Extensions.Logging;
 
 namespace AuthLibrary.Services;
 
-internal sealed class EmailVerificationService<TUser> where TUser : class, IAuthUser
+internal sealed class EmailVerificationService<TUser> : IEmailVerificationService<TUser> where TUser : class, IAuthUser
 {
     private readonly AuthRuntime<TUser> _runtime;
 
@@ -18,55 +19,57 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
     public async Task<Result> ResendVerificationEmail(string email)
     {
         _runtime.Logger.LogInformation("Richiesta resend email verifica");
-        _runtime.Logger.LogDebug("Richiesta resend email verifica per {email}", email);
+        _runtime.Logger.LogDebug("Richiesta resend email verifica");
+        const string genericResponse = "Se l'email e registrata e non ancora verificata, ti abbiamo inviato un link di verifica.";
 
         var normalizedEmail = AuthRuntime<TUser>.NormalizeEmail(email);
-
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(
-            RateLimitRequestType.VerifyEmail,
-            normalizedEmail,
-            "Troppi tentativi. Riprova più tardi.");
-        if (blockedResult.IsFailure)
+        var emailValidation = InputValidators.ValidateEmail(normalizedEmail);
+        if (emailValidation.IsFailure)
         {
-            _runtime.Logger.LogWarning("Resend bloccato (rate limit)");
-            _runtime.Logger.LogDebug("Resend bloccato per email {email} (rate limit)", email);
-            return Result.Fail(blockedResult.Error);
+            return Result.Ok(genericResponse);
         }
 
-        var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(
+        var gateResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldown(
             RateLimitRequestType.VerifyEmail,
             normalizedEmail,
+            "Troppi tentativi. Riprova piu tardi.",
             "Attendi prima di richiedere un nuovo invio.");
-        if (cooldownResult.IsFailure)
+        if (gateResult.IsFailure)
         {
-            _runtime.Logger.LogWarning("Resend in cooldown");
-            _runtime.Logger.LogDebug("Resend in cooldown per email {email}", email);
-            return Result.Fail(cooldownResult.Error);
+            _runtime.Logger.LogWarning("Resend bloccato o in cooldown");
+            _runtime.Logger.LogDebug("Resend bloccato/cooldown");
+            return Result.Ok(genericResponse);
         }
 
         var user = await _runtime.Repository.GetUserByEmailAsync(normalizedEmail);
         if (user == null)
         {
-            await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.VerifyEmail, normalizedEmail);
-            return Result.Ok("Se l'email è registrata, ti abbiamo inviato un link di verifica.");
+            await ApplyResendTransition(normalizedEmail);
+            return Result.Ok(genericResponse);
         }
 
         if (user.EmailVerified)
         {
             _runtime.Logger.LogInformation("Resend richiesto per email gia verificata");
-            _runtime.Logger.LogDebug("Resend richiesto per email gia verificata {email}", email);
-            return Result.Ok("Se l'email è registrata e non ancora verificata, ti abbiamo inviato un link di verifica.");
+            _runtime.Logger.LogDebug("Resend richiesto per email gia verificata");
+            await ApplyResendTransition(normalizedEmail);
+            return Result.Ok(genericResponse);
         }
 
         var (plainToken, tokenHash) = _runtime.GenerateSecureToken();
-        await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(user.Id);
-        await _runtime.Repository.AddEmailVerifiedTokenAsync(new EmailVerifiedToken
+        var token = new EmailVerifiedToken
         {
             UserId = user.Id,
             TokenHash = tokenHash,
             ExpiresAt = DateTime.UtcNow.AddMinutes(30)
+        };
+
+        await ExecuteInTransaction(async () =>
+        {
+            await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(user.Id);
+            await _runtime.Repository.AddEmailVerifiedTokenAsync(token);
+            await _runtime.Repository.SaveChangesAsync();
         });
-        await _runtime.Repository.SaveChangesAsync();
 
         var emailResult = await SendAuthEmail(
             RateLimitRequestType.VerifyEmail,
@@ -78,16 +81,25 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
             "/verify-email?token=");
         if (emailResult.IsFailure)
         {
-            return Result.Fail(emailResult.Error);
+            _runtime.Logger.LogWarning("Resend interno fallito con code {code}", emailResult.ErrorCode);
+            _runtime.Logger.LogDebug("Resend interno fallito");
+            return Result.Ok(genericResponse);
         }
 
         _runtime.Logger.LogInformation("Email di verifica reinviata");
-        _runtime.Logger.LogDebug("Email di verifica reinviata a {email}", email);
-        return Result.Ok("Email di verifica inviata.");
+        _runtime.Logger.LogDebug("Email di verifica reinviata");
+        return Result.Ok(genericResponse);
     }
 
     public async Task<Result<bool>> VerifyMail(string token)
     {
+        var tokenValidation = InputValidators.ValidateToken(token);
+        if (tokenValidation.IsFailure)
+        {
+            _runtime.Logger.LogWarning("VerifyMail: token non valido");
+            return Result.Ok(false);
+        }
+
         var tokenHash = AuthRuntime<TUser>.HashToken(token);
         var entry = await _runtime.Repository.GetEmailVerifiedTokenAsync(tokenHash);
         if (entry == null)
@@ -99,23 +111,37 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
         if (entry.ExpiresAt < DateTime.UtcNow)
         {
             _runtime.Logger.LogWarning("VerifyMail: token scaduto, cleanup");
-            await _runtime.Repository.RemoveEmailVerifiedTokenAsync(entry);
-            await _runtime.Repository.SaveChangesAsync();
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveEmailVerifiedTokenAsync(entry);
+                await _runtime.Repository.SaveChangesAsync();
+            });
             return Result.Ok(false);
         }
 
         var user = await _runtime.Repository.GetUserByIdAsync(entry.UserId);
-        if (user != null)
+        if (user == null)
+        {
+            await ExecuteInTransaction(async () =>
+            {
+                await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
+                await _runtime.Repository.SaveChangesAsync();
+            });
+
+            _runtime.Logger.LogWarning("VerifyMail: token valido ma utente non trovato");
+            return Result.Ok(false);
+        }
+
+        await ExecuteInTransaction(async () =>
         {
             user.EmailVerified = true;
             await _runtime.Repository.UpdateUserAsync(user);
-        }
-
-        await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
-        await _runtime.Repository.SaveChangesAsync();
+            await _runtime.Repository.RemoveEmailVerifiedTokensByUserIdAsync(entry.UserId);
+            await _runtime.Repository.SaveChangesAsync();
+        });
 
         _runtime.Logger.LogInformation("Email verificata con successo");
-        _runtime.Logger.LogDebug("Email verificata con successo per utente {email}", user?.Email);
+        _runtime.Logger.LogDebug("Email verificata con successo");
         return Result.Ok(true);
     }
 
@@ -128,51 +154,59 @@ internal sealed class EmailVerificationService<TUser> where TUser : class, IAuth
         string subject,
         string urlPath)
     {
-        _runtime.Logger.LogDebug("Preparazione invio email {type} a {email}", type, email);
+        _runtime.Logger.LogDebug("Preparazione invio email {type}", type);
 
-        var blockedResult = await _runtime.RateLimitGuard.EnsureNotBlocked(type, email, "utente bloccato");
-        if (blockedResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Block RATE LIMIT {type}", type);
-            _runtime.Logger.LogDebug("Block RATE LIMIT {type} per email {email}", type, email);
-            return Result.Fail(blockedResult.Error);
-        }
-
-        var cooldownResult = await _runtime.RateLimitGuard.EnsureNotInCooldown(type, email, "utente in cooldown");
-        if (cooldownResult.IsFailure)
-        {
-            _runtime.Logger.LogWarning("Cooldown attivo (tipo {type})", type);
-            _runtime.Logger.LogDebug("Cooldown attivo per email {email} (tipo {type})", email, type);
-            return Result.Fail(cooldownResult.Error);
-        }
-
-        var attemptResult = await _runtime.RateLimitGuard.RegisterAttempt(type, email, "troppi tentativi, utente bloccato temporaneamente");
-        if (attemptResult.IsFailure)
+        var rateLimitResult = await _runtime.RateLimitGuard.EnsureNotBlockedOrInCooldownAndRegisterAttempt(
+            type,
+            email,
+            "utente bloccato",
+            "utente in cooldown",
+            "troppi tentativi, utente bloccato temporaneamente");
+        if (rateLimitResult.IsFailure)
         {
             _runtime.Logger.LogWarning("Tentativi eccessivi per {type}. Utente bloccato.", type);
-            _runtime.Logger.LogDebug("Tentativi eccessivi per {type} email {email}. Utente bloccato.", type, email);
-            return Result.Fail(attemptResult.Error);
+            _runtime.Logger.LogDebug("Tentativi eccessivi per {type}. Utente bloccato.", type);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RateLimited, rateLimitResult.Error);
         }
 
-        var url = $"{_runtime.AuthSettings.FrontendUrl}{urlPath}{Uri.EscapeDataString(plainToken)}";
-        var html = await _runtime.TemplateService.RenderTemplateAsync(templateName, new Dictionary<string, string>
+        try
         {
-            { "username", username },
-            { "url", url }
-        });
+            var url = $"{_runtime.AuthSettings.FrontendUrl}{urlPath}{Uri.EscapeDataString(plainToken)}";
+            var html = await _runtime.TemplateService.RenderTemplateAsync(templateName, new Dictionary<string, string>
+            {
+                { "username", username },
+                { "url", url }
+            });
 
-        await _runtime.MailService.SendAsync(new MailDto
+            await _runtime.MailService.SendAsync(new MailDto
+            {
+                From = _runtime.MailSettings.AppMail,
+                EmailTo = email,
+                Subject = subject,
+                Body = html,
+                IsHtml = true
+            });
+        }
+        catch (Exception ex)
         {
-            From = _runtime.MailSettings.AppMail,
-            EmailTo = email,
-            Subject = subject,
-            Body = html,
-            IsHtml = true
-        });
+            _runtime.Logger.LogError(ex, "Invio email {type} fallito", type);
+            return AuthErrorCatalog.Fail(AuthErrorCode.RecoveryError, "Impossibile inviare email. Riprova piu tardi.");
+        }
 
         _runtime.Logger.LogInformation("Email {type} inviata", type);
-        _runtime.Logger.LogDebug("Email {type} inviata a {email}", type, email);
+        _runtime.Logger.LogDebug("Email {type} inviata", type);
         await _runtime.RateLimitService.StartCooldown(type, email, TimeSpan.FromSeconds(60));
         return Result.Ok();
+    }
+
+    private async Task ApplyResendTransition(string email)
+    {
+        await _runtime.RateLimitService.RegisterAttempted(RateLimitRequestType.VerifyEmail, email);
+        await _runtime.RateLimitService.StartCooldown(RateLimitRequestType.VerifyEmail, email, TimeSpan.FromSeconds(60));
+    }
+
+    private Task ExecuteInTransaction(Func<Task> operation)
+    {
+        return _runtime.ExecuteInTransactionAsync(operation);
     }
 }

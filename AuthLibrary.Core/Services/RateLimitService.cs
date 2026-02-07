@@ -2,11 +2,13 @@ using AuthLibrary.Configuration;
 using AuthLibrary.Enum;
 using AuthLibrary.Interfaces;
 using Microsoft.AspNetCore.Http;
+using System.Net;
 
 namespace AuthLibrary.Services;
 
 public class RateLimitService : IRateLimitService
 {
+    private const int MaxIdentifierLength = 256;
     private readonly IRedisService _redisService;
     private readonly IHttpContextAccessor _contextAccessor;
     private readonly Dictionary<RateLimitRequestType, RateLimitConfiguration> _config;
@@ -20,10 +22,8 @@ public class RateLimitService : IRateLimitService
     {
         _redisService = redisService;
         _contextAccessor = contextAccessor;
-        _config = config ?? BuildConfig();
-        _trustedProxyIps = trustedProxyIps == null
-            ? new HashSet<string>()
-            : new HashSet<string>(trustedProxyIps);
+        _config = MergeWithDefaults(config);
+        _trustedProxyIps = BuildTrustedProxySet(trustedProxyIps);
     }
 
     /// <summary>
@@ -32,42 +32,107 @@ public class RateLimitService : IRateLimitService
     /// </summary>
     private string GetClientIP(string identifier)
     {
+        var safeIdentifier = NormalizeIdentifier(identifier);
         var context = _contextAccessor.HttpContext;
         if (context == null)
         {
             // No HttpContext (background/non-HTTP usage); scope to identifier to avoid global lockouts.
-            return $"unknown-ip:{identifier}";
+            return $"unknown-ip:{safeIdentifier}";
         }
 
-        // Check X-Forwarded-For header only if request came from a trusted proxy
-        var remoteIp = context.Connection.RemoteIpAddress?.ToString();
-        if (!string.IsNullOrEmpty(remoteIp) && _trustedProxyIps.Contains(remoteIp))
+        var remoteIp = NormalizeIp(context.Connection.RemoteIpAddress?.ToString());
+        if (remoteIp == null)
+        {
+            return "unknown-ip";
+        }
+
+        // Parse X-Forwarded-For only when the request originates from a trusted proxy.
+        // We walk right-to-left and pick the first non-trusted valid IP to avoid spoofed
+        // leftmost values when clients inject their own header and proxies append to it.
+        if (_trustedProxyIps.Contains(remoteIp))
         {
             var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
             if (!string.IsNullOrEmpty(forwardedFor))
             {
-                // X-Forwarded-For can contain multiple IPs: client, proxy1, proxy2...
-                // Take the first one (leftmost) as the original client IP
-                var clientIp = forwardedFor.Split(',')[0].Trim();
-                if (!string.IsNullOrEmpty(clientIp))
+                var candidates = forwardedFor
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(NormalizeIp)
+                    .Where(ip => !string.IsNullOrEmpty(ip))
+                    .Cast<string>()
+                    .ToArray();
+
+                for (var i = candidates.Length - 1; i >= 0; i--)
                 {
-                    return clientIp;
+                    if (!_trustedProxyIps.Contains(candidates[i]))
+                    {
+                        return candidates[i];
+                    }
                 }
             }
         }
 
-        // Fall back to RemoteIpAddress
-        return string.IsNullOrEmpty(remoteIp) ? "unknown-ip" : remoteIp;
+        return remoteIp;
+    }
+
+    private static HashSet<string> BuildTrustedProxySet(IEnumerable<string>? trustedProxyIps)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (trustedProxyIps == null)
+        {
+            return set;
+        }
+
+        foreach (var proxy in trustedProxyIps)
+        {
+            var normalized = NormalizeIp(proxy);
+            if (!string.IsNullOrEmpty(normalized))
+            {
+                set.Add(normalized);
+            }
+        }
+
+        return set;
+    }
+
+    private static string? NormalizeIp(string? ip)
+    {
+        if (string.IsNullOrWhiteSpace(ip))
+        {
+            return null;
+        }
+
+        return IPAddress.TryParse(ip.Trim(), out var parsed)
+            ? parsed.ToString()
+            : null;
+    }
+
+    private static string NormalizeIdentifier(string? identifier)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            return string.Empty;
+        }
+
+        var normalized = identifier.Trim();
+        return normalized.Length <= MaxIdentifierLength
+            ? normalized
+            : normalized[..MaxIdentifierLength];
     }
 
     public async Task<bool> IsBlocked(RateLimitRequestType type, string identifier)
     {
-        var ip = GetClientIP(identifier);
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        var ip = GetClientIP(normalizedIdentifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
         string ipLockKey = $"rl:lock:{type}:ip:{ip}";
-        string userLockKey = $"rl:lock:{type}:{identifier}";
-
         var ipBlocked = await _redisService.GetValue(ipLockKey) != null;
+        if (!hasIdentifier)
+        {
+            return ipBlocked;
+        }
+
+        string userLockKey = $"rl:lock:{type}:{normalizedIdentifier}";
         var userBlocked = await _redisService.GetValue(userLockKey) != null;
 
         return ipBlocked || userBlocked;
@@ -81,22 +146,28 @@ public class RateLimitService : IRateLimitService
             throw new InvalidOperationException("enum non registrato");
         }
 
-        var ip = GetClientIP(idenfier);
+        var normalizedIdentifier = NormalizeIdentifier(idenfier);
+        var ip = GetClientIP(normalizedIdentifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
         string ipAttemptKey = $"rl:attempt:{type}:ip:{ip}";
-        string identifierAttemptKey = $"rl:attempt:{type}:{idenfier}";
-
         var ipAttempts = await _redisService.Increment(ipAttemptKey, 1);
-        var identifierAttempts = await _redisService.Increment(identifierAttemptKey, 1);
+        double identifierAttempts = 0;
 
         if (ipAttempts == 1)
         {
              await _redisService.Expire(ipAttemptKey, configuration.AttemptWindow);
         }
-        
-        if (identifierAttempts == 1)
+
+        if (hasIdentifier)
         {
-             await _redisService.Expire(identifierAttemptKey, configuration.AttemptWindow);
+            string identifierAttemptKey = $"rl:attempt:{type}:{normalizedIdentifier}";
+            identifierAttempts = await _redisService.Increment(identifierAttemptKey, 1);
+
+            if (identifierAttempts == 1)
+            {
+                 await _redisService.Expire(identifierAttemptKey, configuration.AttemptWindow);
+            }
         }
 
         if (ipAttempts > configuration.MaxIpAttempts)
@@ -105,9 +176,9 @@ public class RateLimitService : IRateLimitService
             return true;
         }
 
-        if (identifierAttempts > configuration.MaxUserAttempts)
+        if (hasIdentifier && identifierAttempts > configuration.MaxUserAttempts)
         {
-            await _redisService.SetValue($"rl:lock:{type}:{idenfier}", "1", configuration.LockDuration);
+            await _redisService.SetValue($"rl:lock:{type}:{normalizedIdentifier}", "1", configuration.LockDuration);
             return true;
         }
 
@@ -116,27 +187,51 @@ public class RateLimitService : IRateLimitService
 
     public async Task Reset(RateLimitRequestType type, string identifier)
     {
-        var ip = GetClientIP(identifier);
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        var hasIdentifier = !string.IsNullOrWhiteSpace(normalizedIdentifier);
 
-        await _redisService.Remove($"rl:attempt:{type}:ip:{ip}");
-        await _redisService.Remove($"rl:attempt:{type}:{identifier}");
+        // Preserve IP counters across successful authentications to avoid brute-force bypass
+        // via alternating successful/failed attempts from the same source.
+        if (!hasIdentifier)
+        {
+            return;
+        }
+
+        await _redisService.Remove($"rl:attempt:{type}:{normalizedIdentifier}");
+        await _redisService.Remove($"rl:lock:{type}:{normalizedIdentifier}");
     }
 
     public async Task<bool> IsInCooldown(RateLimitRequestType type, string identifier)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         return await _redisService.GetValue(key) != null;
     }
 
     public async Task StartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration)
     {
-        string key = $"rl:cooldown:{type}:{identifier}";
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
         await _redisService.SetValue(key, "1", duration);
+    }
+
+    public async Task<bool> TryStartCooldown(RateLimitRequestType type, string identifier, TimeSpan duration)
+    {
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
+        return await _redisService.TrySetValue(key, "1", duration);
+    }
+
+    public async Task ClearCooldown(RateLimitRequestType type, string identifier)
+    {
+        var normalizedIdentifier = NormalizeIdentifier(identifier);
+        string key = $"rl:cooldown:{type}:{normalizedIdentifier}";
+        await _redisService.Remove(key);
     }
 
     public static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildConfig(RateLimitSettings? settings = null)
     {
-        var config = new Dictionary<RateLimitRequestType, RateLimitConfiguration>();
+        var config = BuildDefaultConfig();
         if (settings?.Rules != null && settings.Rules.Count > 0)
         {
             foreach (var entry in settings.Rules)
@@ -148,11 +243,31 @@ public class RateLimitService : IRateLimitService
             }
         }
 
-        if (config.Count > 0)
+        return config;
+    }
+
+    private static Dictionary<RateLimitRequestType, RateLimitConfiguration> MergeWithDefaults(
+        Dictionary<RateLimitRequestType, RateLimitConfiguration>? config)
+    {
+        var merged = BuildDefaultConfig();
+        if (config == null)
         {
-            return config;
+            return merged;
         }
 
+        foreach (var entry in config)
+        {
+            if (entry.Value != null)
+            {
+                merged[entry.Key] = entry.Value;
+            }
+        }
+
+        return merged;
+    }
+
+    private static Dictionary<RateLimitRequestType, RateLimitConfiguration> BuildDefaultConfig()
+    {
         return new()
         {
             {
@@ -193,6 +308,26 @@ public class RateLimitService : IRateLimitService
                     MaxIpAttempts = 10,
                     AttemptWindow = TimeSpan.FromMinutes(30),
                     LockDuration = TimeSpan.FromMinutes(15)
+                }
+            },
+            {
+                RateLimitRequestType.ExternalLogin,
+                new RateLimitConfiguration
+                {
+                    MaxUserAttempts = 5,
+                    MaxIpAttempts = 20,
+                    AttemptWindow = TimeSpan.FromMinutes(15),
+                    LockDuration = TimeSpan.FromMinutes(5)
+                }
+            },
+            {
+                RateLimitRequestType.RefreshToken,
+                new RateLimitConfiguration
+                {
+                    MaxUserAttempts = 30,
+                    MaxIpAttempts = 60,
+                    AttemptWindow = TimeSpan.FromMinutes(15),
+                    LockDuration = TimeSpan.FromMinutes(5)
                 }
             }
         };
